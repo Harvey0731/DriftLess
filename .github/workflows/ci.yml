@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    name: TypeScript Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run typecheck
+
+  lint:
+    name: ESLint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run lint
+
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run test -- --coverage --ci --forceExit
+      - name: Check test coverage threshold
+        run: |
+          npm run test:coverage -- --ci --forceExit --coverageReporters=text-summary 2>&1 | tee coverage-output.txt
+          # Fail if no tests found
+          if grep -q "No tests found" coverage-output.txt; then
+            echo "ERROR: No tests found! CI requires tests."
+            exit 1
+          fi
+      - name: Enforce minimum coverage (70% statements)
+        run: |
+          STMT_PCT=$(npx jest --coverage --ci --forceExit --coverageReporters=json-summary 2>/dev/null; node -e "const c=require('./coverage/coverage-summary.json'); console.log(c.total.statements.pct)")
+          echo "Statement coverage: ${STMT_PCT}%"
+          node -e "if(Number(process.argv[1])<70){console.error('Coverage ${process.argv[1]}% is below 70% threshold');process.exit(1)}" "$STMT_PCT"
+      - name: Upload Coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 7
+
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: Audit dependencies
+        run: npm audit --audit-level=high || true
+      - name: Check for secrets in code
+        run: |
+          # Check for common secret patterns
+          if grep -rn "sk_live\|sk_test\|AKIA\|password\s*=\s*['\"]" --include="*.ts" --include="*.tsx" --include="*.js" src/ app/ 2>/dev/null; then
+            echo "WARNING: Possible secrets found in source code!"
+            exit 1
+          fi
+          echo "No secrets detected in source code."
+
+  build-check:
+    name: Build Verification
+    needs: [typecheck, lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: Verify Expo export
+        run: npx expo export --platform web 2>&1
