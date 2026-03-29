@@ -12,7 +12,10 @@ import {
 } from 'react-native'
 import { Stack, useRouter } from 'expo-router'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { LinearGradient } from 'expo-linear-gradient'
+import { MaterialIcons } from '@expo/vector-icons'
 import EnergySelector, { type EnergyLevel } from '@/src/components/checkin/EnergySelector'
+import { AI_CHECKIN_STUB_ENABLED, stubAiCheckin } from '@/src/stubs/aiCheckin.stub'
 import TaskBreakdown, { type Task } from '@/src/components/checkin/TaskBreakdown'
 import { useAuthStore } from '@/src/stores/authStore'
 import { getTodayCheckIn } from '@/src/services/checkin.service'
@@ -118,35 +121,39 @@ export default function CheckInScreen() {
 
   function handleEnergySelect(energy: EnergyLevel) {
     setSelectedEnergy(energy)
+    // Selection is now confirmed via the Continue button, not auto-advance
+  }
 
-    if (energy === 'need-a-break') {
-      // CHECKIN-05: Show break options instead of navigating away immediately
+  function handleEnergyContinue() {
+    if (!selectedEnergy) return
+    if (selectedEnergy === 'need-a-break') {
       setStep(5)
       return
     }
-
-    setTimeout(() => setStep(2), 300)
+    setStep(2)
   }
 
   async function handleSubmitMessage() {
-    if (userMessage.trim().length === 0) return
     if (!selectedEnergy || selectedEnergy === 'need-a-break') return
 
     setHasSubmittedMessage(true)
     setAiLoading(true)
 
     try {
-      // CHECKIN-03/04/09: Call the ai-checkin Edge Function
-      const { data, error } = await supabase.functions.invoke('ai-checkin', {
-        body: {
-          energyLevel: energyToNumber(selectedEnergy),
-          message: userMessage.trim(),
-        },
-      })
+      let data: { message: string; tasks: Array<{ id: string; title: string; estimated_mins: number; difficulty: string }>; check_in_id: string; clarification?: string }
 
-      if (error) throw error
+      if (AI_CHECKIN_STUB_ENABLED) {
+        // STUB — remove AI_CHECKIN_STUB_ENABLED import + this block when API key is ready
+        data = await stubAiCheckin()
+      } else {
+        const result = await supabase.functions.invoke('ai-checkin', {
+          body: { energyLevel: energyToNumber(selectedEnergy), message: userMessage.trim() },
+        })
+        if (result.error) throw result.error
+        data = result.data
+      }
 
-      // BREAK-05: Handle clarification response for vague goals (capped to prevent infinite loop)
+      // BREAK-05: Handle clarification response
       if (data?.clarification && clarificationCount < MAX_CLARIFICATION_ROUNDS) {
         setClarificationQuestion(data.clarification)
         setClarificationCount((c) => c + 1)
@@ -154,22 +161,11 @@ export default function CheckInScreen() {
         return
       }
 
-      // Parse response — the Edge Function returns { message, tasks, check_in_id }
-      const responseMessage: string = data?.message ?? ''
-      const responseTasks: Array<{
-        id: string
-        title: string
-        estimated_mins: number
-        difficulty: string
-      }> = data?.tasks ?? []
-
-      setAiMessage(responseMessage)
+      setAiMessage(data?.message ?? '')
       setCheckInId(data?.check_in_id ?? null)
       setClarificationQuestion('')
-
-      // Map to the Task shape used by the UI
       setTasks(
-        responseTasks.map((t) => ({
+        (data?.tasks ?? []).map((t) => ({
           id: t.id ?? generateId(),
           title: t.title,
           estimatedMinutes: t.estimated_mins ?? 15,
@@ -177,14 +173,9 @@ export default function CheckInScreen() {
           included: true,
         })),
       )
-
       setTimeout(() => setStep(3), 600)
     } catch (err: unknown) {
-      Alert.alert(
-        'Something went wrong',
-        err instanceof Error ? err.message : 'Could not reach the AI service. Please try again.',
-      )
-      // Reset so the user can re-submit
+      Alert.alert('Something went wrong', err instanceof Error ? err.message : 'Could not reach the AI service. Please try again.')
       setHasSubmittedMessage(false)
     } finally {
       setAiLoading(false)
@@ -255,14 +246,17 @@ export default function CheckInScreen() {
     setRegenerateLoading(true)
 
     try {
-      const { data, error } = await supabase.functions.invoke('ai-checkin', {
-        body: {
-          energyLevel: energyToNumber(selectedEnergy),
-          message: `${userMessage.trim()}. Please suggest a DIFFERENT approach and different task breakdown than before.`,
-        },
-      })
+      let data: { message: string; tasks: Array<{ id: string; title: string; estimated_mins: number; difficulty: string }>; check_in_id?: string }
 
-      if (error) throw error
+      if (AI_CHECKIN_STUB_ENABLED) {
+        data = await stubAiCheckin()
+      } else {
+        const result = await supabase.functions.invoke('ai-checkin', {
+          body: { energyLevel: energyToNumber(selectedEnergy), message: `${userMessage.trim()}. Please suggest a DIFFERENT approach.` },
+        })
+        if (result.error) throw result.error
+        data = result.data
+      }
 
       const responseMessage: string = data?.message ?? ''
       const responseTasks: Array<{
@@ -320,7 +314,8 @@ export default function CheckInScreen() {
     setConfirmLoading(true)
 
     // Mark check-in as completed (fire-and-forget with error reporting)
-    if (checkInId) {
+    // Skip DB update for stub IDs — they don't exist in the database
+    if (checkInId && !checkInId.startsWith('stub-')) {
       const updatePayload: Record<string, unknown> = { completed: true }
       if (hardReason) {
         updatePayload.hard_reason = hardReason
@@ -424,17 +419,9 @@ export default function CheckInScreen() {
 
   if (existingCheckInLoading) {
     return (
-      <SafeAreaView className="flex-1 bg-gray-50 items-center justify-center" edges={['bottom']}>
-        <Stack.Screen
-          options={{
-            title: 'Daily Check-in',
-            headerBackTitle: 'Back',
-            headerStyle: { backgroundColor: '#F9FAFB' },
-            headerTintColor: '#8B5CF6',
-            headerTitleStyle: { color: '#1F2937', fontWeight: '600' },
-          }}
-        />
-        <ActivityIndicator size="large" color="#8B5CF6" />
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#FCF9F7', alignItems: 'center', justifyContent: 'center' }} edges={['top', 'bottom']}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <ActivityIndicator size="large" color="#4C54BB" />
       </SafeAreaView>
     )
   }
@@ -443,31 +430,33 @@ export default function CheckInScreen() {
 
   if (alreadyCheckedIn) {
     return (
-      <SafeAreaView className="flex-1 bg-gray-50" edges={['bottom']}>
-        <Stack.Screen
-          options={{
-            title: 'Daily Check-in',
-            headerBackTitle: 'Back',
-            headerStyle: { backgroundColor: '#F9FAFB' },
-            headerTintColor: '#8B5CF6',
-            headerTitleStyle: { color: '#1F2937', fontWeight: '600' },
-          }}
-        />
-        <View className="flex-1 items-center justify-center px-6">
-          <Text className="text-5xl mb-4">&#10003;</Text>
-          <Text className="text-2xl font-bold text-gray-800 text-center mb-2">
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#FCF9F7' }} edges={['top', 'bottom']}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 }}>
+          <View style={{
+            width: 72,
+            height: 72,
+            borderRadius: 36,
+            backgroundColor: '#8EF4E9',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: 24,
+          }}>
+            <MaterialIcons name="check" size={36} color="#006B64" />
+          </View>
+          <Text style={{ fontSize: 24, fontWeight: '700', color: '#323331', textAlign: 'center', marginBottom: 8 }}>
             Already checked in today
           </Text>
-          <Text className="text-base text-gray-500 text-center mb-8">
+          <Text style={{ fontSize: 15, color: '#5f5f5d', textAlign: 'center', marginBottom: 32, lineHeight: 22 }}>
             You've already completed your daily check-in. Come back tomorrow for a fresh start!
           </Text>
           <Pressable
             onPress={() => router.back()}
-            className="bg-purple-500 rounded-xl px-8 py-3"
+            style={{ backgroundColor: '#4C54BB', borderRadius: 999, paddingHorizontal: 32, paddingVertical: 14 }}
             accessibilityRole="button"
             accessibilityLabel="Go back to home screen"
           >
-            <Text className="text-white text-base font-semibold">Go back</Text>
+            <Text style={{ color: '#FFFFFF', fontSize: 15, fontWeight: '600' }}>Go back</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -478,88 +467,181 @@ export default function CheckInScreen() {
 
   function renderStep1() {
     return (
-      <View className="flex-1 px-6">
-        <Text className="text-2xl font-bold text-gray-800 text-center mb-2">
-          How's your energy today?
-        </Text>
-        <Text className="text-base text-gray-500 text-center mb-8">
-          No wrong answers -- just check in with yourself.
-        </Text>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16, paddingBottom: 48 }}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Headline */}
+        <View style={{ alignItems: 'center', marginBottom: 48 }}>
+          <Text style={{
+            fontSize: 34,
+            fontWeight: '700',
+            color: '#323331',
+            textAlign: 'center',
+            letterSpacing: -0.5,
+            marginBottom: 12,
+            lineHeight: 42,
+          }}>
+            How's your energy today?
+          </Text>
+          <Text style={{ fontSize: 17, color: '#5f5f5d', textAlign: 'center', lineHeight: 26 }}>
+            This shapes everything about today's session.
+          </Text>
+        </View>
+
+        {/* Full-width stacked energy cards */}
         <EnergySelector selectedEnergy={selectedEnergy} onSelect={handleEnergySelect} />
-      </View>
+
+        {/* Reflection pill — secondary-container */}
+        <View style={{
+          backgroundColor: '#8EF4E9',
+          borderRadius: 16,
+          padding: 20,
+          flexDirection: 'row',
+          alignItems: 'flex-start',
+          marginTop: 32,
+          marginBottom: 48,
+          gap: 12,
+        }}>
+          <MaterialIcons name="lightbulb-outline" size={22} color="#006B64" style={{ marginTop: 1 }} />
+          <Text style={{ flex: 1, fontSize: 14, color: '#006B64', fontWeight: '500', lineHeight: 22 }}>
+            Remember, energy is finite. Choosing "Low" doesn't mean failure—it means we'll prioritize gentle, restorative focus today.
+          </Text>
+        </View>
+
+        {/* Continue button — gradient pill, centered */}
+        <View style={{ alignItems: 'center' }}>
+          <Pressable
+            onPress={handleEnergyContinue}
+            disabled={!selectedEnergy}
+            style={({ pressed }) => ({ opacity: pressed ? 0.9 : 1 })}
+            accessibilityRole="button"
+            accessibilityLabel="Continue"
+          >
+            <LinearGradient
+              colors={['#4C54BB', '#B8BCFF']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={{
+                borderRadius: 999,
+                paddingVertical: 18,
+                paddingHorizontal: 48,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 10,
+                opacity: selectedEnergy ? 1 : 0.45,
+                shadowColor: '#4C54BB',
+                shadowOffset: { width: 0, height: 8 },
+                shadowOpacity: 0.25,
+                shadowRadius: 16,
+                elevation: selectedEnergy ? 4 : 0,
+              }}
+            >
+              <Text style={{ fontSize: 17, fontWeight: '700', color: '#FFFFFF' }}>Continue</Text>
+              <MaterialIcons name="arrow-forward" size={20} color="#FFFFFF" />
+            </LinearGradient>
+          </Pressable>
+        </View>
+      </ScrollView>
     )
   }
 
-  // --- Step 2: AI Conversation ---
+  // --- Step 2: Context Input ---
 
   function renderStep2() {
-    // Static initial prompt based on energy level (shown before AI response arrives)
-    const initialPrompt =
-      selectedEnergy === 'good'
-        ? 'Great energy! What would you like to work on today?'
-        : selectedEnergy === 'meh'
-          ? "That's totally okay. What's the one thing you'd be relieved to have started today?"
-          : "Thanks for being honest. What's the one thing you'd be relieved to have started today?"
-
     return (
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        className="flex-1"
+        style={{ flex: 1 }}
       >
-        <ScrollView className="flex-1 px-6" keyboardShouldPersistTaps="handled">
-          {/* AI message bubble */}
-          <View className="bg-purple-50 rounded-2xl rounded-tl-sm p-4 mb-6 max-w-[90%]">
-            <Text className="text-base text-gray-700 leading-6">{initialPrompt}</Text>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 16, paddingBottom: 48 }}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Heading */}
+          <View style={{ marginBottom: 28 }}>
+            <Text style={{ fontSize: 28, fontWeight: '700', color: '#323331', lineHeight: 36, letterSpacing: -0.3, marginBottom: 10 }}>
+              What's the one thing you'd be relieved to have started today?
+            </Text>
+            <Text style={{ fontSize: 17, color: '#5f5f5d', lineHeight: 26 }}>
+              Write anything. I'll figure it out.
+            </Text>
           </View>
 
-          {/* User input or submitted message */}
-          {hasSubmittedMessage ? (
-            <View className="bg-white border border-gray-200 rounded-2xl rounded-tr-sm p-4 mb-6 self-end max-w-[90%] ml-auto">
-              <Text className="text-base text-gray-800">{userMessage}</Text>
-            </View>
-          ) : (
-            <View className="mb-4">
+          {/* Input container — tonal layering style */}
+          {!hasSubmittedMessage ? (
+            <View style={{
+              backgroundColor: '#F6F3F1',
+              borderRadius: 24,
+              padding: 20,
+              minHeight: 240,
+            }}>
               <TextInput
-                className="bg-white border border-gray-200 rounded-2xl px-4 py-3 text-base text-gray-800 min-h-[48px]"
-                placeholder="Tell me what you'd like to work on..."
-                placeholderTextColor="#9CA3AF"
+                style={{
+                  flex: 1,
+                  fontSize: 18,
+                  color: '#323331',
+                  lineHeight: 28,
+                  minHeight: 160,
+                  textAlignVertical: 'top',
+                }}
+                placeholder="Write anything. I'll figure it out."
+                placeholderTextColor="rgba(123,123,120,0.4)"
                 value={userMessage}
                 onChangeText={setUserMessage}
                 multiline
                 maxLength={500}
                 accessibilityLabel="What would you like to work on today?"
               />
-              <Pressable
-                onPress={handleSubmitMessage}
-                disabled={userMessage.trim().length === 0}
-                className={`mt-3 rounded-xl py-3 items-center ${
-                  userMessage.trim().length > 0 ? 'bg-purple-500' : 'bg-gray-200'
-                }`}
-                accessibilityRole="button"
-                accessibilityLabel="Send message"
-              >
-                <Text
-                  className={`text-base font-semibold ${
-                    userMessage.trim().length > 0 ? 'text-white' : 'text-gray-400'
-                  }`}
-                >
-                  Send
+              {/* AI indicator row */}
+              <View style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                borderTopWidth: 1,
+                borderTopColor: 'rgba(179,178,175,0.15)',
+                paddingTop: 14,
+                marginTop: 12,
+                gap: 10,
+              }}>
+                <MaterialIcons name="auto-awesome" size={16} color="rgba(76,84,187,0.6)" />
+                <Text style={{ fontSize: 13, fontWeight: '500', color: 'rgba(76,84,187,0.6)', letterSpacing: 0.2 }}>
+                  AI will organize your thought into actionable steps
                 </Text>
-              </Pressable>
+              </View>
+            </View>
+          ) : (
+            /* Submitted state — show the message as a card */
+            <View style={{
+              backgroundColor: '#FFFFFF',
+              borderRadius: 24,
+              padding: 20,
+              borderWidth: 1,
+              borderColor: '#E4E2DF',
+            }}>
+              <Text style={{ fontSize: 17, color: '#323331', lineHeight: 26 }}>{userMessage || 'Getting your tasks...'}</Text>
+              {aiLoading && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 16, gap: 10 }}>
+                  <ActivityIndicator size="small" color="#4C54BB" />
+                  <Text style={{ fontSize: 14, color: '#5f5f5d' }}>Building your plan...</Text>
+                </View>
+              )}
             </View>
           )}
 
-          {/* BREAK-05: Clarification question from AI */}
+          {/* BREAK-05: Clarification question */}
           {clarificationQuestion && !hasSubmittedMessage && (
-            <>
-              <View className="bg-purple-50 rounded-2xl rounded-tl-sm p-4 mb-4 max-w-[90%]">
-                <Text className="text-base text-gray-700 leading-6">{clarificationQuestion}</Text>
+            <View style={{ marginTop: 16 }}>
+              <View style={{ backgroundColor: '#EEF0FF', borderRadius: 16, padding: 16, marginBottom: 12 }}>
+                <Text style={{ fontSize: 15, color: '#4C54BB', lineHeight: 22 }}>{clarificationQuestion}</Text>
               </View>
-              <View className="mb-4">
+              <View style={{ backgroundColor: '#F6F3F1', borderRadius: 16, padding: 16 }}>
                 <TextInput
-                  className="bg-white border border-gray-200 rounded-2xl px-4 py-3 text-base text-gray-800 min-h-[48px]"
+                  style={{ fontSize: 16, color: '#323331', minHeight: 80, textAlignVertical: 'top' }}
                   placeholder="Be more specific..."
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor="rgba(123,123,120,0.4)"
                   value={clarificationInput}
                   onChangeText={setClarificationInput}
                   multiline
@@ -576,39 +658,71 @@ export default function CheckInScreen() {
                     setHasSubmittedMessage(true)
                     handleSubmitClarification(clarified)
                   }}
-                  disabled={clarificationInput.trim().length === 0}
-                  className={`mt-3 rounded-xl py-3 items-center ${
-                    clarificationInput.trim().length > 0 ? 'bg-purple-500' : 'bg-gray-200'
-                  }`}
+                  style={{ marginTop: 10, backgroundColor: '#4C54BB', borderRadius: 12, paddingVertical: 12, alignItems: 'center' }}
                   accessibilityRole="button"
                 >
-                  <Text
-                    className={`text-base font-semibold ${
-                      clarificationInput.trim().length > 0 ? 'text-white' : 'text-gray-400'
-                    }`}
-                  >
-                    Send
-                  </Text>
+                  <Text style={{ color: '#FFFFFF', fontWeight: '600', fontSize: 15 }}>Send</Text>
                 </Pressable>
               </View>
-            </>
-          )}
-
-          {/* AI loading / response indicator */}
-          {hasSubmittedMessage && (
-            <View className="bg-purple-50 rounded-2xl rounded-tl-sm p-4 max-w-[90%]">
-              {aiLoading ? (
-                <View className="flex-row items-center gap-2">
-                  <ActivityIndicator size="small" color="#8B5CF6" />
-                  <Text className="text-base text-gray-500">Thinking...</Text>
-                </View>
-              ) : (
-                <Text className="text-base text-gray-700">
-                  {aiMessage || "Got it! I've put together a plan for you. Let's take a look..."}
-                </Text>
-              )}
             </View>
           )}
+
+          {/* Reflection pill */}
+          <View style={{
+            backgroundColor: '#8EF4E9',
+            borderRadius: 16,
+            paddingHorizontal: 24,
+            paddingVertical: 18,
+            flexDirection: 'row',
+            alignItems: 'center',
+            marginTop: 40,
+            marginBottom: 40,
+            gap: 14,
+            shadowColor: '#323331',
+            shadowOffset: { width: 0, height: 20 },
+            shadowOpacity: 0.06,
+            shadowRadius: 40,
+            elevation: 2,
+          }}>
+            <MaterialIcons name="lightbulb" size={22} color="#006B64" />
+            <Text style={{ flex: 1, fontSize: 14, color: '#006B64', fontWeight: '500', lineHeight: 21 }}>
+              Even a messy thought can become a clear plan. Don't worry about the details yet.
+            </Text>
+          </View>
+
+          {/* Get my tasks CTA — full width gradient */}
+          <Pressable
+            onPress={handleSubmitMessage}
+            disabled={hasSubmittedMessage && aiLoading}
+            style={({ pressed }) => ({ opacity: pressed ? 0.9 : 1 })}
+            accessibilityRole="button"
+            accessibilityLabel="Get my tasks"
+          >
+            <LinearGradient
+              colors={['#4C54BB', '#B8BCFF']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={{
+                width: '100%',
+                borderRadius: 999,
+                paddingVertical: 18,
+                alignItems: 'center',
+                shadowColor: '#4C54BB',
+                shadowOffset: { width: 0, height: 8 },
+                shadowOpacity: 0.2,
+                shadowRadius: 16,
+                elevation: 3,
+              }}
+            >
+              {hasSubmittedMessage && aiLoading ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={{ fontSize: 17, fontWeight: '700', color: '#FFFFFF', letterSpacing: 0.3 }}>
+                  Get my tasks
+                </Text>
+              )}
+            </LinearGradient>
+          </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
     )
@@ -623,169 +737,234 @@ export default function CheckInScreen() {
     const includedCount = tasks.filter((t) => t.included).length
 
     return (
-      <ScrollView className="flex-1 px-6" showsVerticalScrollIndicator={false}>
-        {/* Show AI message at top of task review */}
-        {aiMessage ? (
-          <View className="bg-purple-50 rounded-2xl p-4 mb-6">
-            <Text className="text-base text-gray-700 leading-6">{aiMessage}</Text>
-          </View>
-        ) : null}
-
-        <Text className="text-2xl font-bold text-gray-800 text-center mb-2">Here's your plan</Text>
-        <Text className="text-base text-gray-500 text-center mb-6">
-          {includedCount} task{includedCount !== 1 ? 's' : ''} -- about {totalMinutes} min total
-        </Text>
-
-        <TaskBreakdown
-          tasks={tasks}
-          onToggle={handleToggleTask}
-          onMakeSmaller={handleMakeSmaller}
-        />
-
-        {/* BREAK-04: Regenerate / try different approach */}
-        <Pressable
-          onPress={handleRegenerate}
-          disabled={regenerateLoading}
-          className="mt-4 py-3 items-center rounded-xl border border-purple-200 bg-purple-50"
-          accessibilityRole="button"
-          accessibilityLabel="Try a different approach"
+      <View style={{ flex: 1 }}>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 32 }}
+          showsVerticalScrollIndicator={false}
         >
-          {regenerateLoading ? (
-            <ActivityIndicator size="small" color="#8B5CF6" />
-          ) : (
-            <Text className="text-purple-600 text-sm font-semibold">Try a different approach</Text>
-          )}
-        </Pressable>
-
-        {/* Why is this hard today? */}
-        <View className="mt-6">
-          <Text className="text-sm font-semibold text-gray-600 mb-2 text-center">
-            Why is this hard today?
-          </Text>
-          <Text className="text-xs text-gray-400 text-center mb-3">
-            Optional — helps Drift coach you better
-          </Text>
-          <View className="flex-row flex-wrap justify-center gap-2">
-            {[
-              { key: 'unclear_start', label: 'Not sure where to start' },
-              { key: 'overwhelmed', label: 'Feeling overwhelmed' },
-              { key: 'fear_of_failure', label: "Scared it won't be good enough" },
-              { key: 'low_motivation', label: 'Just no motivation' },
-            ].map((chip) => (
-              <Pressable
-                key={chip.key}
-                onPress={() => setHardReason(hardReason === chip.key ? null : chip.key)}
-                className={`rounded-full px-4 py-2 border ${
-                  hardReason === chip.key
-                    ? 'bg-purple-50 border-purple-400'
-                    : 'bg-white border-gray-200'
-                }`}
-                accessibilityRole="button"
-                accessibilityState={{ selected: hardReason === chip.key }}
-                accessibilityLabel={chip.label}
-              >
-                <Text
-                  className={`text-sm ${
-                    hardReason === chip.key ? 'text-purple-600 font-semibold' : 'text-gray-600'
-                  }`}
-                >
-                  {chip.label}
-                </Text>
-              </Pressable>
-            ))}
+          {/* Editorial header */}
+          <View style={{ marginBottom: 24 }}>
+            <Text style={{ fontSize: 32, fontWeight: '800', color: '#323331', marginBottom: 6 }}>
+              Here's your plan
+            </Text>
+            <Text style={{ fontSize: 15, color: '#5f5f5d' }}>
+              {includedCount} task{includedCount !== 1 ? 's' : ''} — about {totalMinutes} min total
+            </Text>
           </View>
-        </View>
 
-        {/* Time commitment picker */}
-        <View className="mt-8">
-          <Text className="text-base font-semibold text-gray-700 mb-3 text-center">
-            How much time do you have?
-          </Text>
-          <View className="flex-row justify-center gap-3">
-            {TIME_PRESETS.map((minutes) => (
-              <Pressable
-                key={minutes}
-                onPress={() => {
-                  setIsCustomTime(false)
-                  setTimeCommitment(minutes)
-                }}
-                className={`rounded-xl px-6 py-3 ${
-                  !isCustomTime && timeCommitment === minutes ? 'bg-purple-500' : 'bg-gray-100'
-                }`}
-                accessibilityRole="button"
-                accessibilityState={{ selected: !isCustomTime && timeCommitment === minutes }}
-                accessibilityLabel={`${minutes} minutes`}
-              >
-                <Text
-                  className={`text-base font-semibold ${
-                    !isCustomTime && timeCommitment === minutes ? 'text-white' : 'text-gray-600'
-                  }`}
-                >
-                  {minutes} min
-                </Text>
-              </Pressable>
-            ))}
-            <Pressable
-              onPress={() => {
-                setIsCustomTime(true)
-                setCustomTimeInput('')
-              }}
-              className={`rounded-xl px-6 py-3 ${isCustomTime ? 'bg-purple-500' : 'bg-gray-100'}`}
-              accessibilityRole="button"
-              accessibilityState={{ selected: isCustomTime }}
-              accessibilityLabel="Custom duration"
-            >
-              <Text
-                className={`text-base font-semibold ${
-                  isCustomTime ? 'text-white' : 'text-gray-600'
-                }`}
-              >
-                Custom
-              </Text>
-            </Pressable>
-          </View>
-          {isCustomTime && (
-            <View className="mt-3 items-center">
-              <TextInput
-                className="bg-white border border-gray-200 rounded-xl px-4 py-2 text-base text-gray-800 w-32 text-center"
-                placeholder="Minutes"
-                placeholderTextColor="#9CA3AF"
-                value={customTimeInput}
-                onChangeText={(text) => {
-                  const cleaned = text.replace(/[^0-9]/g, '')
-                  setCustomTimeInput(cleaned)
-                  const num = parseInt(cleaned, 10)
-                  if (num >= 5 && num <= 180) {
-                    setTimeCommitment(num)
-                  }
-                }}
-                keyboardType="number-pad"
-                maxLength={3}
-                accessibilityLabel="Custom minutes (5 to 180)"
-              />
-              <Text className="text-xs text-gray-400 mt-1">5 -- 180 minutes</Text>
+          {/* Task cards */}
+          <TaskBreakdown
+            tasks={tasks}
+            onToggle={handleToggleTask}
+            onMakeSmaller={handleMakeSmaller}
+          />
+
+          {/* WHY IS THIS HARD TODAY? */}
+          <View style={{ marginTop: 32 }}>
+            <Text style={{
+              fontSize: 11,
+              fontWeight: '700',
+              color: '#5f5f5d',
+              letterSpacing: 1.5,
+              textTransform: 'uppercase',
+              marginBottom: 4,
+            }}>
+              Why is this hard today?
+            </Text>
+            <Text style={{ fontSize: 13, color: '#5f5f5d', marginBottom: 12 }}>
+              Optional — helps Drift coach you better
+            </Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {[
+                { key: 'unclear_start', label: 'Not sure where to start' },
+                { key: 'overwhelmed', label: 'Feeling overwhelmed' },
+                { key: 'fear_of_failure', label: "Scared it won't be good enough" },
+                { key: 'low_motivation', label: 'Just no motivation' },
+              ].map((chip) => {
+                const selected = hardReason === chip.key
+                return (
+                  <Pressable
+                    key={chip.key}
+                    onPress={() => setHardReason(selected ? null : chip.key)}
+                    style={{
+                      borderRadius: 999,
+                      paddingHorizontal: 16,
+                      paddingVertical: 9,
+                      backgroundColor: selected ? 'rgba(76,84,187,0.08)' : '#F6F3F1',
+                      borderWidth: 1.5,
+                      borderColor: selected ? '#4C54BB' : 'transparent',
+                    }}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={chip.label}
+                  >
+                    <Text style={{
+                      fontSize: 13,
+                      fontWeight: selected ? '600' : '400',
+                      color: selected ? '#4C54BB' : '#5f5f5d',
+                    }}>
+                      {chip.label}
+                    </Text>
+                  </Pressable>
+                )
+              })}
             </View>
-          )}
-        </View>
+          </View>
 
-        {/* Confirmation button */}
-        <Pressable
-          onPress={handleConfirm}
-          disabled={includedCount === 0 || confirmLoading}
-          className={`mt-8 mb-8 rounded-2xl py-4 items-center ${
-            includedCount > 0 && !confirmLoading ? 'bg-green-500' : 'bg-gray-200'
-          }`}
-          style={({ pressed }) => [pressed ? { opacity: 0.85 } : {}]}
-          accessibilityRole="button"
-          accessibilityLabel="Start focus session"
-        >
-          <Text
-            className={`text-lg font-bold ${includedCount > 0 ? 'text-white' : 'text-gray-400'}`}
+          {/* HOW MUCH TIME DO YOU HAVE? */}
+          <View style={{ marginTop: 28 }}>
+            <Text style={{
+              fontSize: 11,
+              fontWeight: '700',
+              color: '#5f5f5d',
+              letterSpacing: 1.5,
+              textTransform: 'uppercase',
+              marginBottom: 12,
+            }}>
+              How much time do you have?
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {TIME_PRESETS.map((minutes) => {
+                const selected = !isCustomTime && timeCommitment === minutes
+                return (
+                  <Pressable
+                    key={minutes}
+                    onPress={() => {
+                      setIsCustomTime(false)
+                      setTimeCommitment(minutes)
+                    }}
+                    style={{
+                      flex: 1,
+                      backgroundColor: selected ? '#B8BCFF' : '#F6F3F1',
+                      borderRadius: 16,
+                      paddingVertical: 14,
+                      alignItems: 'center',
+                    }}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={`${minutes} minutes`}
+                  >
+                    <Text style={{
+                      fontSize: 16,
+                      fontWeight: '700',
+                      color: selected ? '#323331' : '#5f5f5d',
+                    }}>
+                      {minutes}
+                    </Text>
+                    <Text style={{
+                      fontSize: 11,
+                      color: selected ? '#4C54BB' : '#8f8f8d',
+                      marginTop: 2,
+                    }}>
+                      min
+                    </Text>
+                  </Pressable>
+                )
+              })}
+              {/* Custom */}
+              <Pressable
+                onPress={() => {
+                  setIsCustomTime(true)
+                  setCustomTimeInput('')
+                }}
+                style={{
+                  flex: 1,
+                  backgroundColor: isCustomTime ? '#B8BCFF' : '#F6F3F1',
+                  borderRadius: 16,
+                  paddingVertical: 14,
+                  alignItems: 'center',
+                }}
+                accessibilityRole="button"
+                accessibilityState={{ selected: isCustomTime }}
+                accessibilityLabel="Custom duration"
+              >
+                <Text style={{
+                  fontSize: 16,
+                  fontWeight: '700',
+                  color: isCustomTime ? '#323331' : '#5f5f5d',
+                }}>
+                  ···
+                </Text>
+                <Text style={{
+                  fontSize: 11,
+                  color: isCustomTime ? '#4C54BB' : '#8f8f8d',
+                  marginTop: 2,
+                }}>
+                  custom
+                </Text>
+              </Pressable>
+            </View>
+            {isCustomTime && (
+              <View style={{ marginTop: 12, alignItems: 'center' }}>
+                <TextInput
+                  style={{
+                    backgroundColor: '#F6F3F1',
+                    borderRadius: 12,
+                    paddingHorizontal: 16,
+                    paddingVertical: 10,
+                    fontSize: 16,
+                    color: '#323331',
+                    width: 120,
+                    textAlign: 'center',
+                  }}
+                  placeholder="Minutes"
+                  placeholderTextColor="#9CA3AF"
+                  value={customTimeInput}
+                  onChangeText={(text) => {
+                    const cleaned = text.replace(/[^0-9]/g, '')
+                    setCustomTimeInput(cleaned)
+                    const num = parseInt(cleaned, 10)
+                    if (num >= 5 && num <= 180) {
+                      setTimeCommitment(num)
+                    }
+                  }}
+                  keyboardType="number-pad"
+                  maxLength={3}
+                  accessibilityLabel="Custom minutes (5 to 180)"
+                />
+                <Text style={{ fontSize: 11, color: '#9CA3AF', marginTop: 4 }}>5 – 180 minutes</Text>
+              </View>
+            )}
+          </View>
+        </ScrollView>
+
+        {/* Fixed bottom CTA */}
+        <View style={{ paddingHorizontal: 24, paddingBottom: 16, paddingTop: 8 }}>
+          <Pressable
+            onPress={handleConfirm}
+            disabled={includedCount === 0 || confirmLoading}
+            style={({ pressed }) => ({ opacity: pressed ? 0.9 : 1 })}
+            accessibilityRole="button"
+            accessibilityLabel="Start focus session"
           >
-            Let's do this
-          </Text>
-        </Pressable>
-      </ScrollView>
+            <LinearGradient
+              colors={includedCount > 0 ? ['#4C54BB', '#8B93FF'] : ['#C8C8C8', '#C8C8C8']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={{
+                borderRadius: 999,
+                height: 64,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+              }}
+            >
+              {confirmLoading ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <>
+                  <Text style={{ fontSize: 17, fontWeight: '700', color: '#FFFFFF' }}>
+                    Let's do this
+                  </Text>
+                  <MaterialIcons name="arrow-forward" size={20} color="#FFFFFF" />
+                </>
+              )}
+            </LinearGradient>
+          </Pressable>
+        </View>
+      </View>
     )
   }
 
@@ -843,18 +1022,55 @@ export default function CheckInScreen() {
   // --- Main render ---
 
   return (
-    <SafeAreaView className="flex-1 bg-gray-50" edges={['bottom']}>
-      <Stack.Screen
-        options={{
-          title: 'Daily Check-in',
-          headerBackTitle: 'Back',
-          headerStyle: { backgroundColor: '#F9FAFB' },
-          headerTintColor: '#8B5CF6',
-          headerTitleStyle: { color: '#1F2937', fontWeight: '600' },
-        }}
-      />
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#FCF9F7' }} edges={['top', 'bottom']}>
+      <Stack.Screen options={{ headerShown: false }} />
 
-      {progressDots}
+      {/* Header */}
+      <View style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 24,
+        height: 64,
+        backgroundColor: '#FCF9F7',
+      }}>
+        {/* Left — back button (step 2+) or spacer (step 1) */}
+        {step > 1 && step !== 5 ? (
+          <Pressable
+            onPress={() => setStep((s) => Math.max(1, s - 1))}
+            style={{ padding: 8, borderRadius: 20 }}
+            accessibilityLabel="Go back"
+          >
+            <MaterialIcons name="arrow-back" size={24} color="#8B93FF" />
+          </Pressable>
+        ) : (
+          <View style={{ width: 40 }} />
+        )}
+
+        {/* Center — always shown */}
+        {step !== 5 && (
+          <View style={{ alignItems: 'center' }}>
+            <Text style={{ fontSize: 10, fontWeight: '700', color: '#4C54BB', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 2 }}>
+              Step {step} of 3
+            </Text>
+            <Text style={{ fontSize: 16, fontWeight: '600', color: '#323331' }}>
+              {step === 1 ? 'Energy Check-in' : step === 2 ? 'Context Check-in' : 'Your Tasks'}
+            </Text>
+          </View>
+        )}
+
+        {/* Right spacer */}
+        <View style={{ width: 40 }} />
+      </View>
+
+      {/* Shared progress bar */}
+      {step < 5 && (
+        <View style={{ paddingHorizontal: 24, paddingBottom: 8, backgroundColor: '#FCF9F7' }}>
+          <View style={{ height: 5, backgroundColor: '#F0EDEB', borderRadius: 999, overflow: 'hidden' }}>
+            <View style={{ width: `${(step / 3) * 100}%`, height: 5, backgroundColor: '#4C54BB', borderRadius: 999 }} />
+          </View>
+        </View>
+      )}
 
       {step === 1 && renderStep1()}
       {step === 2 && renderStep2()}

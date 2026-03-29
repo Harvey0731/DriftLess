@@ -1,5 +1,8 @@
 import React from 'react'
 import { View, Text, Pressable } from 'react-native'
+import { LinearGradient } from 'expo-linear-gradient'
+import { MaterialIcons } from '@expo/vector-icons'
+import * as Haptics from 'expo-haptics'
 
 interface TimerControlsProps {
   isPaused: boolean
@@ -10,50 +13,56 @@ interface TimerControlsProps {
 
 export default function TimerControls({ isPaused, onPause, onResume, onEnd }: TimerControlsProps) {
   return (
-    <View className="items-center gap-4">
+    <View style={{ alignItems: 'center', gap: 32 }}>
       {/* Large circular play/pause button */}
       <Pressable
-        onPress={isPaused ? onResume : onPause}
-        className={`w-20 h-20 rounded-full items-center justify-center ${
-          isPaused ? 'bg-purple-500' : 'bg-purple-600'
-        }`}
-        style={({ pressed }) => [pressed ? { opacity: 0.85, transform: [{ scale: 0.95 }] } : {}]}
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+          isPaused ? onResume() : onPause()
+        }}
+        style={({ pressed }) => ({
+          opacity: pressed ? 0.9 : 1,
+          transform: [{ scale: pressed ? 0.95 : 1 }],
+          borderRadius: 999,
+          shadowColor: '#4C54BB',
+          shadowOffset: { width: 0, height: 8 },
+          shadowOpacity: 0.3,
+          shadowRadius: 16,
+          elevation: 8,
+        })}
         accessibilityRole="button"
         accessibilityLabel={isPaused ? 'Resume timer' : 'Pause timer'}
       >
-        {isPaused ? (
-          /* Play icon: right-pointing triangle */
-          <View
-            style={{
-              width: 0,
-              height: 0,
-              borderLeftWidth: 20,
-              borderTopWidth: 14,
-              borderBottomWidth: 14,
-              borderLeftColor: 'white',
-              borderTopColor: 'transparent',
-              borderBottomColor: 'transparent',
-              marginLeft: 4,
-            }}
+        <LinearGradient
+          colors={['#4C54BB', '#B8BCFF']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={{
+            width: 72,
+            height: 72,
+            borderRadius: 999,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <MaterialIcons
+            name={isPaused ? 'play-arrow' : 'pause'}
+            size={36}
+            color="#FBF8FF"
           />
-        ) : (
-          /* Pause icon: two vertical bars */
-          <View className="flex-row gap-2">
-            <View className="w-3 h-7 rounded-sm bg-white" />
-            <View className="w-3 h-7 rounded-sm bg-white" />
-          </View>
-        )}
+        </LinearGradient>
       </Pressable>
 
-      {/* End session button */}
+      {/* End session text link */}
       <Pressable
         onPress={onEnd}
-        className="bg-gray-100 rounded-xl px-8 py-3"
-        style={({ pressed }) => [pressed ? { opacity: 0.7 } : {}]}
+        style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
         accessibilityRole="button"
         accessibilityLabel="End session"
       >
-        <Text className="text-gray-600 text-base font-medium">I'm done for now</Text>
+        <Text style={{ color: '#5F5F5D', fontSize: 15, fontWeight: '500' }}>
+          I'm done for now
+        </Text>
       </Pressable>
     </View>
   )

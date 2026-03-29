@@ -4,6 +4,8 @@ import { Stack, useRouter, useSegments, router as expoRouter } from 'expo-router
 import * as SplashScreen from 'expo-splash-screen'
 import { useEffect, useState } from 'react'
 import { AppState } from 'react-native'
+import { StatusBar } from 'expo-status-bar'
+import { SafeAreaProvider } from 'react-native-safe-area-context'
 import 'react-native-reanimated'
 import '../global.css'
 
@@ -12,6 +14,7 @@ import { ErrorBoundary } from '@/src/components/ErrorBoundary'
 import { supabase } from '@/src/lib/supabase'
 import { setLastActivity, getLastActivity, clearLastActivity } from '@/src/lib/mmkv'
 import { initSentry, setSentryUser, captureError } from '@/src/lib/sentry'
+import { useAuthStore } from '@/src/stores/authStore'
 import type { Session } from '@supabase/supabase-js'
 
 // Initialize error monitoring
@@ -56,18 +59,30 @@ const DriftlessDarkTheme = {
 function useProtectedRoute(session: Session | null, isLoading: boolean) {
   const segments = useSegments()
   const router = useRouter()
+  const profile = useAuthStore((s) => s.profile)
 
   useEffect(() => {
     if (isLoading) return
 
     const inAuthGroup = segments[0] === '(auth)'
+    const inOnboarding = segments[0] === '(onboarding)'
 
     if (!session && !inAuthGroup) {
+      // Not logged in → go to sign-in
       router.replace('/(auth)/sign-in')
     } else if (session && inAuthGroup) {
-      router.replace('/(tabs)')
+      // Logged in but still on auth screens
+      if (profile && !profile.onboarding_done) {
+        router.replace('/(onboarding)/goal-setup' as never)
+      } else {
+        router.replace('/(tabs)')
+      }
+    } else if (session && !inAuthGroup && !inOnboarding && profile && !profile.onboarding_done) {
+      // User is on tabs/other screens but hasn't completed onboarding — redirect back
+      router.replace('/(onboarding)/goal-setup' as never)
     }
-  }, [session, segments, isLoading, router])
+    // If in onboarding, don't redirect — let them finish
+  }, [session, segments, isLoading, router, profile])
 }
 
 export default function RootLayout() {
@@ -92,12 +107,23 @@ export default function RootLayout() {
             clearLastActivity()
             if (!mounted) return
             setSession(null)
+            useAuthStore.setState({ user: null, session: null, isAuthenticated: false, isLoading: false })
             setIsLoading(false)
             return
           }
           setLastActivity()
         }
         setSession(session)
+        // Populate authStore so all screens can read user/profile via the store
+        useAuthStore.setState({
+          user: session?.user ?? null,
+          session: session,
+          isAuthenticated: !!(session?.user && session),
+          isLoading: false,
+        })
+        if (session?.user) {
+          useAuthStore.getState().fetchProfile().catch(() => {})
+        }
         setIsLoading(false)
       })
       .catch((err) => {
@@ -106,6 +132,7 @@ export default function RootLayout() {
         })
         if (!mounted) return
         setSession(null)
+        useAuthStore.setState({ user: null, session: null, isAuthenticated: false, isLoading: false })
         setIsLoading(false)
       })
 
@@ -114,6 +141,18 @@ export default function RootLayout() {
     } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session)
       setSentryUser(session?.user?.id ?? null)
+      // Keep authStore in sync on every auth event (sign-in, sign-out, token refresh)
+      useAuthStore.setState({
+        user: session?.user ?? null,
+        session: session,
+        isAuthenticated: !!(session?.user && session),
+        isLoading: false,
+      })
+      if (session?.user) {
+        useAuthStore.getState().fetchProfile().catch(() => {})
+      } else {
+        useAuthStore.setState({ profile: null })
+      }
       if (event === 'PASSWORD_RECOVERY') {
         // User clicked the password reset link — navigate to the reset screen
         // Use a short delay so the router is ready
@@ -167,9 +206,11 @@ function RootLayoutNav({ session, isLoading }: { session: Session | null; isLoad
   useProtectedRoute(session, isLoading)
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DriftlessDarkTheme : DriftlessLightTheme}>
-      <ErrorBoundary>
-        <Stack>
+    <SafeAreaProvider>
+      <ThemeProvider value={colorScheme === 'dark' ? DriftlessDarkTheme : DriftlessLightTheme}>
+        <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
+        <ErrorBoundary>
+          <Stack>
           <Stack.Screen name="(auth)" options={{ headerShown: false }} />
           <Stack.Screen name="(onboarding)" options={{ headerShown: false }} />
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
@@ -194,10 +235,7 @@ function RootLayoutNav({ session, isLoading }: { session: Session | null; isLoad
           <Stack.Screen
             name="session-rating"
             options={{
-              headerShown: true,
-              title: 'Rate Your Session',
-              headerStyle: { backgroundColor: '#FAF5FF' },
-              headerTintColor: '#8B5CF6',
+              headerShown: false,
               presentation: 'modal',
               gestureEnabled: false,
             }}
@@ -262,8 +300,9 @@ function RootLayoutNav({ session, isLoading }: { session: Session | null; isLoad
               headerTintColor: '#EF4444',
             }}
           />
-        </Stack>
-      </ErrorBoundary>
-    </ThemeProvider>
+          </Stack>
+        </ErrorBoundary>
+      </ThemeProvider>
+    </SafeAreaProvider>
   )
 }

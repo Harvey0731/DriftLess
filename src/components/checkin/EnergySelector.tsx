@@ -1,80 +1,92 @@
-import React from 'react';
-import { View, Text, Pressable } from 'react-native';
+import React from 'react'
+import { View, Text, Pressable } from 'react-native'
+import { MaterialIcons } from '@expo/vector-icons'
 
-export type EnergyLevel = 'good' | 'meh' | 'low' | 'need-a-break';
+export type EnergyLevel = 'good' | 'meh' | 'low' | 'need-a-break'
 
 interface EnergyOption {
-  key: EnergyLevel;
-  label: string;
-  description: string;
-  bgClass: string;
-  selectedBgClass: string;
+  key: EnergyLevel
+  emoji: string
+  label: string
+  description: string
 }
 
 const ENERGY_OPTIONS: EnergyOption[] = [
-  {
-    key: 'good',
-    label: 'Good',
-    description: 'Ready to focus',
-    bgClass: 'bg-green-50',
-    selectedBgClass: 'bg-green-100',
-  },
-  {
-    key: 'meh',
-    label: 'Meh',
-    description: 'Could go either way',
-    bgClass: 'bg-yellow-50',
-    selectedBgClass: 'bg-yellow-100',
-  },
-  {
-    key: 'low',
-    label: 'Low',
-    description: 'Running on empty',
-    bgClass: 'bg-orange-50',
-    selectedBgClass: 'bg-orange-100',
-  },
-  {
-    key: 'need-a-break',
-    label: 'Need a Break',
-    description: 'Not today',
-    bgClass: 'bg-blue-50',
-    selectedBgClass: 'bg-blue-100',
-  },
-];
+  { key: 'good',          emoji: '☀️',  label: 'Good',         description: 'Ready to tackle the day' },
+  { key: 'meh',           emoji: '⛅',  label: 'Meh',          description: 'Moderate energy, manageable' },
+  { key: 'low',           emoji: '☁️',  label: 'Low',          description: 'Struggling but present' },
+  { key: 'need-a-break',  emoji: '⛈️', label: 'Need a Break', description: 'Not a work day' },
+]
 
 interface EnergySelectorProps {
-  selectedEnergy: EnergyLevel | null;
-  onSelect: (energy: EnergyLevel) => void;
+  selectedEnergy: EnergyLevel | null
+  onSelect: (energy: EnergyLevel) => void
 }
 
 export default function EnergySelector({ selectedEnergy, onSelect }: EnergySelectorProps) {
   return (
-    <View className="flex-row flex-wrap justify-between gap-y-4">
+    <View style={{ gap: 16, width: '100%' }}>
       {ENERGY_OPTIONS.map((option) => {
-        const isSelected = selectedEnergy === option.key;
+        const isSelected = selectedEnergy === option.key
+
         return (
           <Pressable
             key={option.key}
             onPress={() => onSelect(option.key)}
-            className={`w-[48%] rounded-2xl p-5 ${
-              isSelected ? option.selectedBgClass : option.bgClass
-            } ${isSelected ? 'border-2 border-purple-500' : 'border-2 border-transparent'}`}
-            style={isSelected ? { transform: [{ scale: 1.03 }] } : undefined}
-            accessibilityRole="button"
+            style={({ pressed }) => ({
+              width: '100%',
+              backgroundColor: isSelected ? '#FFFFFF' : '#F6F3F1',
+              borderRadius: 24,
+              padding: 28,
+              borderWidth: 2,
+              borderColor: isSelected ? '#4C54BB' : '#E4E2DF',
+              opacity: pressed ? 0.9 : 1,
+            })}
+            accessibilityRole="radio"
             accessibilityLabel={`${option.label}: ${option.description}`}
             accessibilityState={{ selected: isSelected }}
           >
-            <Text
-              className={`text-lg font-bold mb-1 ${
-                isSelected ? 'text-purple-700' : 'text-gray-800'
-              }`}
-            >
+            {/* Checkmark badge — top right corner, only when selected */}
+            {isSelected && (
+              <View style={{
+                position: 'absolute',
+                top: 14,
+                right: 14,
+                width: 24,
+                height: 24,
+                borderRadius: 12,
+                backgroundColor: '#4C54BB',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+                <MaterialIcons name="check" size={14} color="#FFFFFF" />
+              </View>
+            )}
+
+            {/* Emoji */}
+            <Text style={{ fontSize: 44, marginBottom: 20 }}>{option.emoji}</Text>
+
+            {/* Label */}
+            <Text style={{
+              fontSize: 20,
+              fontWeight: '700',
+              color: '#323331',
+              marginBottom: 6,
+            }}>
               {option.label}
             </Text>
-            <Text className="text-sm text-gray-500">{option.description}</Text>
+
+            {/* Description */}
+            <Text style={{
+              fontSize: 15,
+              color: '#5f5f5d',
+              lineHeight: 22,
+            }}>
+              {option.description}
+            </Text>
           </Pressable>
-        );
+        )
       })}
     </View>
-  );
+  )
 }

@@ -99,6 +99,32 @@ export function isToday(dateString: string): boolean {
 }
 
 /**
+ * Compute consecutive-day streak from an array of ISO date strings (YYYY-MM-DD).
+ * Counts backwards from today; if today has no entry, yesterday can still start the streak.
+ */
+export function computeStreak(activeDates: string[]): number {
+  if (activeDates.length === 0) return 0
+  const dateSet = new Set(activeDates)
+  const today = new Date()
+  let streak = 0
+
+  for (let i = 0; i < 365; i++) {
+    const d = new Date(today)
+    d.setDate(d.getDate() - i)
+    const s = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    if (dateSet.has(s)) {
+      streak++
+    } else if (i === 0) {
+      // today is fine to skip — check yesterday before breaking
+      continue
+    } else {
+      break
+    }
+  }
+  return streak
+}
+
+/**
  * Get today's date as YYYY-MM-DD
  */
 export function getTodayDateString(): string {

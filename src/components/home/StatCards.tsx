@@ -1,5 +1,6 @@
 import React from 'react'
 import { View, Text } from 'react-native'
+import { MaterialIcons } from '@expo/vector-icons'
 
 interface StatCardsProps {
   focusMinutes: number
@@ -8,23 +9,23 @@ interface StatCardsProps {
 
 function StatCards({ focusMinutes, streak }: StatCardsProps) {
   return (
-    <View className="flex-row gap-3 px-5">
-      {/* Focus Today */}
-      <View className="flex-1 bg-surface rounded-2xl p-4 shadow-sm shadow-black/5">
-        <View className="w-10 h-10 rounded-full bg-primary/10 items-center justify-center mb-2">
-          <Text className="text-primary text-base font-bold">⏱️</Text>
-        </View>
-        <Text className="text-2xl font-bold text-text">{focusMinutes}</Text>
-        <Text className="text-xs text-textSecondary">Focus minutes today</Text>
+    <View className="flex-row px-5" style={{ gap: 12 }}>
+      {/* Focus Minutes — bg-surface-container-low (#F6F3F1) */}
+      <View className="flex-1 rounded-2xl p-5" style={{ backgroundColor: '#F6F3F1' }}>
+        <MaterialIcons name="timer" size={24} color="#4C54BB" style={{ marginBottom: 8 }} />
+        <Text style={{ fontSize: 28, fontWeight: '700', color: '#323331' }}>{focusMinutes}</Text>
+        <Text style={{ fontSize: 11, color: '#5f5f5d', letterSpacing: 1, fontWeight: '500', marginTop: 4, textTransform: 'uppercase' }}>
+          Focus Minutes
+        </Text>
       </View>
 
-      {/* Streak */}
-      <View className="flex-1 bg-surface rounded-2xl p-4 shadow-sm shadow-black/5">
-        <View className="w-10 h-10 rounded-full bg-warning/10 items-center justify-center mb-2">
-          <Text className="text-warning text-base font-bold">🔥</Text>
-        </View>
-        <Text className="text-2xl font-bold text-text">{streak}</Text>
-        <Text className="text-xs text-textSecondary">Day streak</Text>
+      {/* Day Streak */}
+      <View className="flex-1 rounded-2xl p-5" style={{ backgroundColor: '#F6F3F1' }}>
+        <MaterialIcons name="local-fire-department" size={24} color="#006B64" style={{ marginBottom: 8 }} />
+        <Text style={{ fontSize: 28, fontWeight: '700', color: '#323331' }}>{streak}</Text>
+        <Text style={{ fontSize: 11, color: '#5f5f5d', letterSpacing: 1, fontWeight: '500', marginTop: 4, textTransform: 'uppercase' }}>
+          Day Streak
+        </Text>
       </View>
     </View>
   )

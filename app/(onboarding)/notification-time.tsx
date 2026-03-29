@@ -6,15 +6,16 @@ import { useRouter, useLocalSearchParams } from 'expo-router'
 type TimeOption = {
   label: string
   description: string
+  subtext: string
   hour: number
-  minute: number
+  icon: string
 }
 
 const PRESET_TIMES: TimeOption[] = [
-  { label: 'Morning', description: '8:00 AM', hour: 8, minute: 0 },
-  { label: 'Midday', description: '12:00 PM', hour: 12, minute: 0 },
-  { label: 'Afternoon', description: '3:00 PM', hour: 15, minute: 0 },
-  { label: 'Evening', description: '7:00 PM', hour: 19, minute: 0 },
+  { label: 'Morning', description: '8:00 AM', subtext: "We'll check in before the avoidance kicks in.", hour: 8, icon: '🌅' },
+  { label: 'Midday', description: '12:00 PM', subtext: 'A midday reset to realign your focus.', hour: 12, icon: '☀️' },
+  { label: 'Afternoon', description: '3:00 PM', subtext: 'Catch the post-lunch energy dip.', hour: 15, icon: '🌤' },
+  { label: 'Evening', description: '7:00 PM', subtext: 'Wind-down planning for tomorrow.', hour: 19, icon: '🌙' },
 ]
 
 const CUSTOM_HOURS = Array.from({ length: 24 }, (_, i) => {
@@ -65,102 +66,133 @@ export default function NotificationTimeScreen() {
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
-      <ScrollView contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
-        <View className="flex-1 px-6 py-8">
-          {/* Progress indicator */}
-          <View className="flex-row items-center mb-8">
-            <View className="flex-1 h-1.5 rounded-full bg-primary mr-2" />
-            <View className="flex-1 h-1.5 rounded-full bg-primary mr-2" />
-            <View className="flex-1 h-1.5 rounded-full bg-gray-200" />
-          </View>
-          <Text className="text-xs text-textSecondary text-center mb-6">Step 2 of 3</Text>
+    <SafeAreaView className="flex-1 bg-[#FAF8F5]">
+      {/* Header */}
+      <View className="flex-row items-center px-5 py-3">
+        <TouchableOpacity
+          onPress={() => router.back()}
+          className="w-10 h-10 items-center justify-center"
+          accessibilityLabel="Go back"
+        >
+          <Text className="text-xl text-gray-800">←</Text>
+        </TouchableOpacity>
+        <View className="flex-1 items-center">
+          <Text className="text-base font-semibold text-primary">Driftless</Text>
+        </View>
+        <View className="w-10" />
+      </View>
 
-          {/* Header */}
+      {/* Progress bar */}
+      <View className="px-6 mb-4">
+        <View className="h-1 rounded-full bg-gray-200">
+          <View className="h-1 rounded-full bg-primary" style={{ width: '33%' }} />
+        </View>
+      </View>
+
+      <ScrollView contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
+        <View className="flex-1 px-6 pb-8">
+          {/* Heading */}
           <View className="mb-8">
-            <Text className="text-2xl font-bold text-text mb-3">
+            <Text className="text-[28px] font-bold text-gray-900 leading-[34px] mb-2">
               When do you usually intend to start — but don't?
             </Text>
-            <Text className="text-base text-textSecondary leading-6">
+            <Text className="text-base text-gray-500 leading-6">
               We'll check in before the avoidance kicks in. One gentle nudge per day.
             </Text>
           </View>
 
-          {/* Preset time options */}
-          <View className="gap-3 mb-4">
-            {PRESET_TIMES.map((option, index) => {
-              const isSelected = selectedPreset === index && !isCustom
-              return (
-                <TouchableOpacity
-                  key={option.label}
-                  onPress={() => handlePresetPress(index)}
-                  className={`flex-row items-center justify-between p-4 rounded-xl border-2 ${
-                    isSelected ? 'border-primary bg-primary/5' : 'border-gray-200 bg-gray-50'
-                  }`}
-                  accessibilityRole="radio"
-                  accessibilityLabel={`${option.label} at ${option.description}`}
-                  accessibilityState={{ selected: isSelected }}
-                >
-                  <View>
-                    <Text
-                      className={`text-base font-semibold ${
-                        isSelected ? 'text-primary' : 'text-text'
-                      }`}
-                    >
-                      {option.label}
-                    </Text>
-                    <Text className="text-sm text-textSecondary mt-0.5">{option.description}</Text>
-                  </View>
-                  {isSelected && (
-                    <View className="w-6 h-6 rounded-full bg-primary items-center justify-center">
-                      <Text className="text-white text-xs font-bold">{'\u2713'}</Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
-              )
-            })}
+          {/* Preset time options - 2x2 grid */}
+          <View style={{ gap: 12, marginBottom: 16 }}>
+            <View className="flex-row" style={{ gap: 12 }}>
+              {PRESET_TIMES.slice(0, 2).map((option, index) => {
+                const isSelected = selectedPreset === index && !isCustom
+                return (
+                  <TouchableOpacity
+                    key={option.label}
+                    onPress={() => handlePresetPress(index)}
+                    className={`flex-1 p-4 rounded-2xl border-2 bg-white ${
+                      isSelected ? 'border-primary' : 'border-transparent'
+                    }`}
+                    style={
+                      !isSelected
+                        ? { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 1 }
+                        : { shadowColor: '#8B5CF6', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 6, elevation: 3 }
+                    }
+                    accessibilityRole="radio"
+                    accessibilityLabel={`${option.label} at ${option.description}`}
+                    accessibilityState={{ selected: isSelected }}
+                  >
+                    <Text className="text-2xl mb-2">{option.icon}</Text>
+                    <Text className="text-base font-bold text-gray-900">{option.label}</Text>
+                    <Text className="text-sm text-gray-500 mt-0.5">{option.description}</Text>
+                  </TouchableOpacity>
+                )
+              })}
+            </View>
+            <View className="flex-row" style={{ gap: 12 }}>
+              {PRESET_TIMES.slice(2).map((option, index) => {
+                const realIndex = index + 2
+                const isSelected = selectedPreset === realIndex && !isCustom
+                return (
+                  <TouchableOpacity
+                    key={option.label}
+                    onPress={() => handlePresetPress(realIndex)}
+                    className={`flex-1 p-4 rounded-2xl border-2 bg-white ${
+                      isSelected ? 'border-primary' : 'border-transparent'
+                    }`}
+                    style={
+                      !isSelected
+                        ? { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 1 }
+                        : { shadowColor: '#8B5CF6', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 6, elevation: 3 }
+                    }
+                    accessibilityRole="radio"
+                    accessibilityLabel={`${option.label} at ${option.description}`}
+                    accessibilityState={{ selected: isSelected }}
+                  >
+                    <Text className="text-2xl mb-2">{option.icon}</Text>
+                    <Text className="text-base font-bold text-gray-900">{option.label}</Text>
+                    <Text className="text-sm text-gray-500 mt-0.5">{option.description}</Text>
+                  </TouchableOpacity>
+                )
+              })}
+            </View>
           </View>
 
           {/* Custom time option */}
           <TouchableOpacity
             onPress={handleCustomPress}
-            className={`flex-row items-center justify-between p-4 rounded-xl border-2 mb-4 ${
-              isCustom ? 'border-primary bg-primary/5' : 'border-gray-200 bg-gray-50'
+            className={`p-4 rounded-2xl border-2 mb-4 bg-white ${
+              isCustom ? 'border-primary' : 'border-transparent'
             }`}
+            style={
+              !isCustom
+                ? { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 1 }
+                : { shadowColor: '#8B5CF6', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 6, elevation: 3 }
+            }
             accessibilityRole="radio"
             accessibilityLabel={`Custom time${isCustom && customHour !== null ? `, currently set to ${getCustomTimeLabel()}` : ''}`}
             accessibilityState={{ selected: isCustom }}
           >
-            <View>
-              <Text
-                className={`text-base font-semibold ${isCustom ? 'text-primary' : 'text-text'}`}
-              >
-                Custom Time
-              </Text>
-              {isCustom && customHour !== null && (
-                <Text className="text-sm text-textSecondary mt-0.5">{getCustomTimeLabel()}</Text>
-              )}
-            </View>
+            <Text className="text-2xl mb-2">⏰</Text>
+            <Text className="text-base font-bold text-gray-900">Custom Time</Text>
             {isCustom && customHour !== null && (
-              <View className="w-6 h-6 rounded-full bg-primary items-center justify-center">
-                <Text className="text-white text-xs font-bold">{'\u2713'}</Text>
-              </View>
+              <Text className="text-sm text-gray-500 mt-0.5">{getCustomTimeLabel()}</Text>
             )}
           </TouchableOpacity>
 
           {/* Custom time picker grid */}
           {showCustomPicker && isCustom && (
-            <View className="mb-4 bg-gray-50 rounded-xl p-3">
-              <Text className="text-xs text-textSecondary mb-2 ml-1">Select a time:</Text>
-              <View className="flex-row flex-wrap gap-2">
+            <View className="mb-4 bg-white rounded-2xl p-3">
+              <Text className="text-xs text-gray-400 mb-2 ml-1 font-semibold tracking-[0.5px]">SELECT A TIME</Text>
+              <View className="flex-row flex-wrap" style={{ gap: 8 }}>
                 {CUSTOM_HOURS.map((item) => {
                   const isHourSelected = customHour === item.hour
                   return (
                     <TouchableOpacity
                       key={item.hour}
                       onPress={() => handleCustomHourSelect(item.hour)}
-                      className={`px-3 py-2 rounded-lg ${
-                        isHourSelected ? 'bg-primary' : 'bg-white border border-gray-200'
+                      className={`px-3 py-2 rounded-xl ${
+                        isHourSelected ? 'bg-primary' : 'bg-gray-50'
                       }`}
                       accessibilityRole="radio"
                       accessibilityLabel={item.label}
@@ -168,7 +200,7 @@ export default function NotificationTimeScreen() {
                     >
                       <Text
                         className={`text-xs font-medium ${
-                          isHourSelected ? 'text-white' : 'text-text'
+                          isHourSelected ? 'text-white' : 'text-gray-700'
                         }`}
                       >
                         {item.label}
@@ -187,18 +219,21 @@ export default function NotificationTimeScreen() {
           <TouchableOpacity
             onPress={handleContinue}
             disabled={!hasSelection}
-            className={`w-full rounded-xl py-4 items-center shadow-sm ${
-              hasSelection ? 'bg-primary' : 'bg-gray-300'
+            className={`w-full rounded-2xl py-4.5 items-center flex-row justify-center ${
+              hasSelection ? 'bg-primary' : 'bg-[#E5E2DF]'
             }`}
             accessibilityRole="button"
             accessibilityLabel="Continue to next step"
             accessibilityState={{ disabled: !hasSelection }}
           >
             <Text
-              className={`text-base font-semibold ${hasSelection ? 'text-white' : 'text-gray-500'}`}
+              className={`text-base font-semibold mr-2 ${
+                hasSelection ? 'text-white' : 'text-gray-400'
+              }`}
             >
               Continue
             </Text>
+            <Text className={`text-base ${hasSelection ? 'text-white' : 'text-gray-400'}`}>→</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>

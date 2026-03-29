@@ -2,6 +2,8 @@ import React, { useState } from 'react'
 import { View, Text, TextInput, Pressable, ScrollView, Alert } from 'react-native'
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { LinearGradient } from 'expo-linear-gradient'
+import { MaterialIcons } from '@expo/vector-icons'
 import { useAuthStore } from '@/src/stores/authStore'
 import { useSessionStore } from '@/src/stores/sessionStore'
 import { toggleTaskComplete } from '@/src/services/tasks.service'
@@ -14,38 +16,38 @@ interface RatingOption {
   key: Rating
   label: string
   description: string
-  bgClass: string
-  selectedBgClass: string
+  dotColor: string
+  borderColor: string
 }
 
 const RATING_OPTIONS: RatingOption[] = [
   {
     key: 'great',
     label: 'Nailed it',
-    description: 'Crushed it',
-    bgClass: 'bg-green-50',
-    selectedBgClass: 'bg-green-100',
+    description: 'Peak flow state achieved',
+    dotColor: '#006B64',
+    borderColor: 'rgba(0,107,100,0.5)',
   },
   {
     key: 'good',
     label: 'Solid',
-    description: 'Solid session',
-    bgClass: 'bg-blue-50',
-    selectedBgClass: 'bg-blue-100',
+    description: 'Good, steady progress',
+    dotColor: '#B8BCFF',
+    borderColor: 'rgba(76,84,187,0.5)',
   },
   {
     key: 'ok',
     label: 'Got started',
-    description: 'You got going',
-    bgClass: 'bg-yellow-50',
-    selectedBgClass: 'bg-yellow-100',
+    description: 'Movement is movement',
+    dotColor: '#FED07F',
+    borderColor: 'rgba(123,89,19,0.4)',
   },
   {
     key: 'struggled',
     label: 'Showed up anyway',
-    description: 'And that matters',
-    bgClass: 'bg-orange-50',
-    selectedBgClass: 'bg-orange-100',
+    description: 'Resistance was high today',
+    dotColor: '#F76A80',
+    borderColor: 'rgba(247,106,128,0.8)',
   },
 ]
 
@@ -102,13 +104,10 @@ export default function SessionRatingScreen() {
         return
       }
 
-      // End the session that was created when the timer started (via sessionStore)
       const sessionStore = useSessionStore.getState()
       if (sessionStore.currentSession) {
         await sessionStore.endSession(ratingValue, selectedRating, note || undefined)
       } else {
-        // Fallback: if no session in store (e.g., app was force-quit),
-        // find the existing active/paused session instead of creating a duplicate.
         const { endSession: endSvc } = await import('@/src/services/sessions.service')
         const { data: existingSession } = await supabase
           .from('focus_sessions')
@@ -120,30 +119,14 @@ export default function SessionRatingScreen() {
           .maybeSingle()
 
         if (existingSession) {
-          await endSvc(
-            existingSession.id,
-            durationSeconds,
-            ratingValue,
-            selectedRating,
-            userId,
-            note || undefined,
-          )
+          await endSvc(existingSession.id, durationSeconds, ratingValue, selectedRating, userId, note || undefined)
         } else {
-          // Last resort: no session found at all — create one to preserve data
           const { createSession: createSvc } = await import('@/src/services/sessions.service')
           const session = await createSvc(userId, taskId, checkInId, plannedMinutes)
-          await endSvc(
-            session.id,
-            durationSeconds,
-            ratingValue,
-            selectedRating,
-            userId,
-            note || undefined,
-          )
+          await endSvc(session.id, durationSeconds, ratingValue, selectedRating, userId, note || undefined)
         }
       }
 
-      // Mark linked task as complete (fire-and-forget, non-blocking)
       if (taskId) {
         toggleTaskComplete(taskId, true, userId).catch((err) => {
           captureError(err instanceof Error ? err : new Error(String(err)), {
@@ -152,7 +135,6 @@ export default function SessionRatingScreen() {
         })
       }
 
-      // Update streak via Supabase RPC (fire-and-forget, report errors to Sentry)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ;(supabase as any)
         .rpc('update_streak', { p_user_id: userId })
@@ -171,7 +153,6 @@ export default function SessionRatingScreen() {
           })
         })
 
-      // Navigate home
       if (router.canGoBack()) {
         router.dismissAll()
       } else {
@@ -181,8 +162,7 @@ export default function SessionRatingScreen() {
       captureError(err instanceof Error ? err : new Error(String(err)), {
         context: 'sessionRating.handleSave',
       })
-      const message = err instanceof Error ? err.message : 'Failed to save session'
-      Alert.alert('Error', message)
+      Alert.alert('Error', err instanceof Error ? err.message : 'Failed to save session')
     } finally {
       setIsSaving(false)
     }
@@ -190,7 +170,7 @@ export default function SessionRatingScreen() {
 
   function handleTalkAboutIt() {
     router.push({
-      pathname: '/(tabs)/chat',
+      pathname: '/bad-day-toolbox',
       params: {
         prefill: `I just finished a ${Math.round(durationSeconds / 60)} minute session on "${taskName}" and I'm struggling. Can we talk about it?`,
       },
@@ -198,118 +178,209 @@ export default function SessionRatingScreen() {
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-gray-50">
-      <Stack.Screen
-        options={{
-          title: 'Session Complete',
-          headerBackTitle: 'Back',
-          headerStyle: { backgroundColor: '#F9FAFB' },
-          headerTintColor: '#8B5CF6',
-          headerTitleStyle: { color: '#1F2937', fontWeight: '600' },
-        }}
-      />
+    // screen background = surface-container-low (#F6F3F1)
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#F6F3F1' }} edges={['top', 'bottom']}>
+      <Stack.Screen options={{ headerShown: false }} />
+
+      {/* Decorative background blobs */}
+      <View pointerEvents="none" style={{ position: 'absolute', top: -40, right: -40, width: 200, height: 200, backgroundColor: '#4C54BB', opacity: 0.04, borderRadius: 999 }} />
+      <View pointerEvents="none" style={{ position: 'absolute', bottom: -40, left: -40, width: 160, height: 160, backgroundColor: '#006B64', opacity: 0.04, borderRadius: 999 }} />
+
+      {/* Header — bg slightly lighter (#FCF9F7) than the content area */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, height: 64, backgroundColor: '#FCF9F7' }}>
+        <Text style={{ fontSize: 20, fontWeight: '700', color: '#8B93FF', letterSpacing: -0.3 }}>
+          Driftless
+        </Text>
+        <Pressable
+          onPress={() => router.back()}
+          style={({ pressed }) => ({ padding: 8, borderRadius: 999, backgroundColor: pressed ? '#F6F3F1' : 'transparent' })}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+        >
+          <MaterialIcons name="close" size={24} color="#8B93FF" />
+        </Pressable>
+      </View>
 
       <ScrollView
-        className="flex-1 px-6 pt-4"
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 32, paddingBottom: 48 }}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Heading */}
-        <Text className="text-2xl font-bold text-gray-800 text-center mb-2">How did it go?</Text>
+        {/* Heading — mb-3 = 12px */}
+        <Text style={{ fontSize: 34, fontWeight: '800', color: '#323331', letterSpacing: -0.5, marginBottom: 12 }}>
+          How did that go?
+        </Text>
 
-        {/* Session summary */}
-        <View className="bg-white border border-gray-200 rounded-2xl p-5 mb-8 items-center">
-          <Text className="text-base font-medium text-gray-700 mb-1" numberOfLines={2}>
+        {/* Task + duration pill — mb-10 = 40px */}
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            alignSelf: 'flex-start',
+            gap: 8,
+            backgroundColor: '#FFFFFF',
+            borderRadius: 999,
+            paddingHorizontal: 16,
+            paddingVertical: 8,
+            marginBottom: 40,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 1 },
+            shadowOpacity: 0.06,
+            shadowRadius: 4,
+            elevation: 2,
+          }}
+        >
+          <MaterialIcons name="assignment" size={16} color="#4C54BB" />
+          <Text style={{ fontSize: 13, fontWeight: '500', color: '#5F5F5D' }} numberOfLines={1}>
             {taskName}
+            <Text style={{ color: '#B3B2AF' }}> · </Text>
+            <Text style={{ color: '#4C54BB', fontWeight: '700' }}>{formatDuration(durationSeconds)}</Text>
           </Text>
-          <View className="flex-row items-center gap-2">
-            <Text className="text-2xl font-bold text-purple-600">
-              {formatDuration(durationSeconds)}
-            </Text>
-            <Text className="text-sm text-gray-400">/ {plannedMinutes}m planned</Text>
-          </View>
         </View>
 
-        {/* Rating cards */}
-        <View className="flex-row flex-wrap justify-between gap-y-4 mb-8">
+        {/* Rating cards — single column */}
+        <View style={{ gap: 12, marginBottom: 40 }}>
           {RATING_OPTIONS.map((option) => {
             const isSelected = selectedRating === option.key
             return (
               <Pressable
                 key={option.key}
                 onPress={() => setSelectedRating(option.key)}
-                className={`w-[48%] rounded-2xl p-5 ${
-                  isSelected ? option.selectedBgClass : option.bgClass
-                } ${isSelected ? 'border-2 border-purple-500' : 'border-2 border-transparent'}`}
-                style={isSelected ? { transform: [{ scale: 1.03 }] } : undefined}
+                style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1, transform: [{ scale: pressed ? 0.97 : 1 }] })}
                 accessibilityRole="button"
                 accessibilityLabel={`${option.label}: ${option.description}`}
                 accessibilityState={{ selected: isSelected }}
               >
-                <Text
-                  className={`text-lg font-bold mb-1 ${
-                    isSelected ? 'text-purple-700' : 'text-gray-800'
-                  }`}
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    paddingVertical: 24,
+                    paddingHorizontal: 20,
+                    backgroundColor: isSelected ? '#F0EDEB' : '#FFFFFF',
+                    borderRadius: 28,
+                    borderWidth: isSelected ? 2 : 0,
+                    borderColor: option.borderColor,
+                    marginHorizontal: isSelected ? 0 : 2,
+                    marginVertical: isSelected ? 0 : 2,
+                    shadowColor: '#323331',
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowOpacity: 0.06,
+                    shadowRadius: 8,
+                    elevation: 2,
+                  }}
                 >
-                  {option.label}
-                </Text>
-                <Text className="text-sm text-gray-500">{option.description}</Text>
+                  <View style={{ width: 16, height: 16, borderRadius: 999, backgroundColor: option.dotColor, marginRight: 16, flexShrink: 0 }} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontWeight: '700', fontSize: 15, color: '#323331', marginBottom: 3 }}>
+                      {option.label}
+                    </Text>
+                    <Text style={{ fontSize: 12, color: '#5F5F5D' }}>
+                      {option.description}
+                    </Text>
+                  </View>
+                </View>
               </Pressable>
             )
           })}
         </View>
 
-        {/* "Want to talk about it?" for Struggled */}
-        {selectedRating === 'struggled' && (
+        {/* Support prompt — always visible, overflow hidden for decorative icon */}
+        <View
+          style={{
+            backgroundColor: 'rgba(142,244,233,0.3)',
+            borderWidth: 1,
+            borderColor: 'rgba(0,107,100,0.1)',
+            borderRadius: 32,
+            padding: 24,
+            marginBottom: 40,
+            overflow: 'hidden',
+          }}
+        >
+          {/* Decorative spa icon — bottom right, 10% opacity */}
+          <View pointerEvents="none" style={{ position: 'absolute', right: -8, bottom: -8, opacity: 0.1 }}>
+            <MaterialIcons name="spa" size={96} color="#006B64" />
+          </View>
+
+          <Text style={{ fontSize: 17, fontWeight: '500', color: '#005C56', lineHeight: 28, fontStyle: 'italic', marginBottom: 16 }}>
+            "Starting was the hard part — and you did it. Want to talk through what made it tough?"
+          </Text>
           <Pressable
             onPress={handleTalkAboutIt}
-            className="bg-purple-50 border border-purple-200 rounded-2xl py-4 px-5 mb-6 items-center"
+            style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1, paddingVertical: 8 })}
             accessibilityRole="button"
-            accessibilityLabel="Want to talk about it?"
+            accessibilityLabel="Talk to Drift"
           >
-            <Text className="text-purple-600 text-base font-semibold">
-              Starting was the hard part — and you did it.
-            </Text>
-            <Text className="text-purple-400 text-sm mt-1">Talk it through with Drift</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <MaterialIcons name="forum" size={20} color="#006B64" />
+              <Text style={{ color: '#006B64', fontWeight: '700', fontSize: 14 }}>Talk to Drift</Text>
+              <MaterialIcons name="arrow-forward" size={14} color="#006B64" />
+            </View>
           </Pressable>
-        )}
+        </View>
 
-        {/* Optional note */}
-        <View className="mb-6">
-          <Text className="text-sm font-medium text-gray-500 mb-2">Add a note (optional)</Text>
+        {/* Notes input — mb-12 = 48px, rounded-lg = 32px */}
+        <View style={{ marginBottom: 48 }}>
+          <Text style={{ fontSize: 13, fontWeight: '600', color: '#5F5F5D', marginBottom: 12, paddingHorizontal: 4 }}>
+            Add a note about this session (optional)
+          </Text>
           <TextInput
-            className="bg-white border border-gray-200 rounded-2xl px-4 py-3 text-base text-gray-800 min-h-[80px]"
-            placeholder="Any reflections on this session..."
-            placeholderTextColor="#9CA3AF"
+            style={{
+              backgroundColor: '#FFFFFF',
+              borderRadius: 32,
+              padding: 16,
+              fontSize: 15,
+              color: '#323331',
+              minHeight: 88,
+              textAlignVertical: 'top',
+            }}
+            placeholder="What felt different this time?"
+            placeholderTextColor="#7B7B78"
             value={note}
             onChangeText={setNote}
             multiline
             maxLength={500}
-            textAlignVertical="top"
             accessibilityLabel="Session note"
           />
-          <Text className="text-xs text-gray-400 mt-1 text-right">{note.length}/500</Text>
+          <Text style={{ fontSize: 11, color: '#B3B2AF', marginTop: 4, textAlign: 'right' }}>
+            {note.length}/500
+          </Text>
         </View>
 
-        {/* Save button */}
+        {/* Save button — rounded-full, py-5 = 20px, gradient 135deg */}
         <Pressable
           onPress={handleSave}
           disabled={!selectedRating || isSaving}
-          className={`rounded-2xl py-4 items-center mb-8 ${
-            selectedRating && !isSaving ? 'bg-purple-500' : 'bg-gray-200'
-          }`}
-          style={({ pressed }) => [pressed && selectedRating ? { opacity: 0.85 } : {}]}
+          style={({ pressed }) => ({ opacity: pressed && selectedRating ? 0.95 : !selectedRating || isSaving ? 0.45 : 1 })}
           accessibilityRole="button"
           accessibilityLabel="Save session"
         >
-          <Text
-            className={`text-lg font-bold ${
-              selectedRating && !isSaving ? 'text-white' : 'text-gray-400'
-            }`}
+          <LinearGradient
+            colors={['#4C54BB', '#B8BCFF']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={{
+              borderRadius: 999,
+              paddingVertical: 20,
+              alignItems: 'center',
+              justifyContent: 'center',
+              shadowColor: '#4C54BB',
+              shadowOffset: { width: 0, height: 8 },
+              shadowOpacity: 0.25,
+              shadowRadius: 16,
+              elevation: 6,
+            }}
           >
-            {isSaving ? 'Saving...' : 'Save Session'}
-          </Text>
+            <Text style={{ color: '#FBF8FF', fontWeight: '700', fontSize: 18 }}>
+              {isSaving ? 'Saving...' : 'Save Session'}
+            </Text>
+          </LinearGradient>
         </Pressable>
+
+        <Text style={{ textAlign: 'center', marginTop: 16, fontSize: 12, color: 'rgba(95,95,93,0.6)', fontWeight: '500' }}>
+          Your sessions help Driftless adapt to your natural rhythm.
+        </Text>
       </ScrollView>
     </SafeAreaView>
   )

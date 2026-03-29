@@ -10,6 +10,8 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
+import { MaterialIcons } from '@expo/vector-icons'
+import { LinearGradient } from 'expo-linear-gradient'
 
 const EXAMPLE_GOALS = [
   'Write my thesis',
@@ -37,7 +39,22 @@ export default function GoalSetupScreen() {
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
+    <SafeAreaView className="flex-1" style={{ backgroundColor: '#FCF9F7' }}>
+      {/* Header: back + Driftless centered */}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 12 }}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22 }}
+          accessibilityLabel="Go back"
+        >
+          <MaterialIcons name="arrow-back" size={24} color="#323331" />
+        </TouchableOpacity>
+        <Text style={{ fontSize: 22, fontWeight: '700', color: '#8B93FF', letterSpacing: -1 }}>
+          Driftless
+        </Text>
+        <View style={{ width: 44 }} />
+      </View>
+
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         className="flex-1"
@@ -47,80 +64,83 @@ export default function GoalSetupScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <View className="flex-1 px-6 py-8">
-            {/* Progress indicator */}
-            <View className="flex-row items-center mb-8">
-              <View className="flex-1 h-1.5 rounded-full bg-primary mr-2" />
-              <View className="flex-1 h-1.5 rounded-full bg-gray-200 mr-2" />
-              <View className="flex-1 h-1.5 rounded-full bg-gray-200" />
-            </View>
-            <Text className="text-xs text-textSecondary text-center mb-6">Step 1 of 3</Text>
-
-            {/* Header */}
-            <View className="mb-8">
-              <Text className="text-2xl font-bold text-text mb-3">
-                What keeps ending up on tomorrow's list?
-              </Text>
-              <Text className="text-base text-textSecondary leading-6">
-                Most people have one thing that keeps getting pushed. Name it.
-              </Text>
-            </View>
+          <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 24, paddingBottom: 32 }}>
+            {/* Heading */}
+            <Text style={{ fontSize: 34, fontWeight: '800', color: '#323331', letterSpacing: -0.5, lineHeight: 40, marginBottom: 12 }}>
+              What keeps ending up on tomorrow's list?
+            </Text>
+            <Text style={{ fontSize: 17, color: '#5f5f5d', lineHeight: 24, marginBottom: 36, maxWidth: 340 }}>
+              Give that one recurring weight a name. Let's break the cycle today.
+            </Text>
 
             {/* Goal text area */}
-            <View className="mb-4">
-              <TextInput
-                className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 text-base text-text min-h-[120px] focus:border-primary focus:bg-white"
-                placeholder="Describe your goal..."
-                placeholderTextColor="#9CA3AF"
-                value={goal}
-                onChangeText={(text) => {
-                  if (text.length <= MAX_CHARS) {
-                    setGoal(text)
-                  }
+            <View style={{ marginBottom: 24 }}>
+              <View
+                style={{
+                  backgroundColor: '#F6F3F1',
+                  borderRadius: 16,
+                  padding: 24,
+                  minHeight: 180,
+                  borderWidth: 1,
+                  borderColor: goal.length > 0 ? 'rgba(76, 84, 187, 0.2)' : 'rgba(179, 178, 175, 0.15)',
                 }}
-                maxLength={500}
-                multiline
-                textAlignVertical="top"
-                accessibilityLabel="Goal description"
-                accessibilityHint="Enter a description of your main goal, between 10 and 500 characters"
-              />
-              <Text
-                className={`text-xs mt-1.5 ml-1 ${
-                  charCount > MAX_CHARS
-                    ? 'text-danger'
-                    : charCount >= MIN_CHARS
-                      ? 'text-accent'
-                      : 'text-textSecondary'
-                }`}
               >
-                {charCount}/{MAX_CHARS} characters
-                {charCount > 0 && charCount < MIN_CHARS && (
-                  <Text className="text-textSecondary"> (minimum {MIN_CHARS})</Text>
-                )}
-              </Text>
+                <TextInput
+                  style={{
+                    fontSize: 18,
+                    fontWeight: '500',
+                    color: '#323331',
+                    minHeight: 120,
+                    textAlignVertical: 'top',
+                  }}
+                  placeholder="Enter your goal..."
+                  placeholderTextColor="rgba(123, 123, 120, 0.6)"
+                  value={goal}
+                  onChangeText={(text) => {
+                    if (text.length <= MAX_CHARS) setGoal(text)
+                  }}
+                  maxLength={500}
+                  multiline
+                  accessibilityLabel="Goal description"
+                />
+                {/* Character counter + status dot */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: 8 }}>
+                  <Text style={{ fontSize: 13, fontWeight: '500', color: '#7B7B78', marginRight: 8 }}>
+                    {charCount} / {MAX_CHARS}
+                  </Text>
+                  <View
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: 4,
+                      backgroundColor: charCount >= MIN_CHARS ? '#006B64' : '#B3B2AF',
+                    }}
+                  />
+                </View>
+              </View>
             </View>
 
-            {/* Example prompts */}
-            <View className="mb-8">
-              <Text className="text-sm text-textSecondary mb-3 ml-1">Or start with an idea:</Text>
-              <View className="flex-row flex-wrap gap-2">
+            {/* Quick Starts */}
+            <View style={{ marginBottom: 32 }}>
+              <Text style={{ fontSize: 12, fontWeight: '600', color: '#5f5f5d', letterSpacing: 3, marginBottom: 14, marginLeft: 2, textTransform: 'uppercase' }}>
+                Quick Starts
+              </Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
                 {EXAMPLE_GOALS.map((example) => (
                   <TouchableOpacity
                     key={example}
                     onPress={() => handleChipPress(example)}
-                    className={`px-4 py-2.5 rounded-xl border ${
-                      goal === example
-                        ? 'bg-primary/10 border-primary'
-                        : 'bg-gray-50 border-gray-200'
-                    }`}
+                    style={{
+                      paddingHorizontal: 20,
+                      paddingVertical: 12,
+                      borderRadius: 999,
+                      backgroundColor: goal === example ? 'rgba(76, 84, 187, 0.12)' : '#EAE8E5',
+                    }}
                     accessibilityRole="button"
                     accessibilityLabel={`Set goal to: ${example}`}
+                    activeOpacity={0.7}
                   >
-                    <Text
-                      className={`text-sm font-medium ${
-                        goal === example ? 'text-primary' : 'text-text'
-                      }`}
-                    >
+                    <Text style={{ fontSize: 14, fontWeight: '500', color: goal === example ? '#4C54BB' : '#323331' }}>
                       {example}
                     </Text>
                   </TouchableOpacity>
@@ -129,25 +149,61 @@ export default function GoalSetupScreen() {
             </View>
 
             {/* Spacer */}
-            <View className="flex-1" />
+            <View style={{ flex: 1 }} />
 
             {/* Continue button */}
-            <TouchableOpacity
-              onPress={handleContinue}
-              disabled={!isValid}
-              className={`w-full rounded-xl py-4 items-center shadow-sm ${
-                isValid ? 'bg-primary' : 'bg-gray-300'
-              }`}
-              accessibilityRole="button"
-              accessibilityLabel="Continue to next step"
-              accessibilityState={{ disabled: !isValid }}
-            >
-              <Text
-                className={`text-base font-semibold ${isValid ? 'text-white' : 'text-gray-500'}`}
+            <View style={{ paddingTop: 24 }}>
+              <TouchableOpacity
+                onPress={handleContinue}
+                disabled={!isValid}
+                style={{
+                  borderRadius: 999,
+                  overflow: 'hidden',
+                  opacity: isValid ? 1 : 0.5,
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Continue to next step"
+                accessibilityState={{ disabled: !isValid }}
+                activeOpacity={0.9}
               >
-                Continue
+                {isValid ? (
+                  <LinearGradient
+                    colors={['#4C54BB', '#B8BCFF']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={{
+                      paddingVertical: 18,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Text style={{ fontSize: 17, fontWeight: '700', color: '#FBF8FF', marginRight: 8 }}>
+                      Continue
+                    </Text>
+                    <MaterialIcons name="arrow-forward" size={20} color="#FBF8FF" />
+                  </LinearGradient>
+                ) : (
+                  <View
+                    style={{
+                      backgroundColor: '#E4E2DF',
+                      paddingVertical: 18,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Text style={{ fontSize: 17, fontWeight: '700', color: '#7B7B78', marginRight: 8 }}>
+                      Continue
+                    </Text>
+                    <MaterialIcons name="arrow-forward" size={20} color="#7B7B78" />
+                  </View>
+                )}
+              </TouchableOpacity>
+              <Text style={{ textAlign: 'center', marginTop: 16, fontSize: 13, fontWeight: '500', color: 'rgba(95, 95, 93, 0.6)' }}>
+                Minimum 10 characters to proceed
               </Text>
-            </TouchableOpacity>
+            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>

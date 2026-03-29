@@ -1,5 +1,6 @@
 import React from 'react'
 import { View, Text, Pressable } from 'react-native'
+import { MaterialIcons } from '@expo/vector-icons'
 
 interface QuickActionsProps {
   onStartSession: () => void
@@ -9,80 +10,103 @@ interface QuickActionsProps {
   onBadDay?: () => void
 }
 
-interface ActionItem {
-  label: string
-  iconText: string
-  bgColor: string
-  textColor: string
-  onPress: () => void
-}
-
 function QuickActions({
   onStartSession,
   onChat,
-  onProgress,
   onPromises,
   onBadDay,
 }: QuickActionsProps) {
-  const actions: ActionItem[] = [
+  const cardStyle = {
+    borderWidth: 1,
+    borderColor: 'rgba(179, 178, 175, 0.05)',
+  }
+
+  const actions = [
     {
       label: 'Start Session',
-      iconText: '▶️',
-      bgColor: 'bg-primary/10',
-      textColor: 'text-primary',
+      icon: 'play-arrow' as const,
+      iconColor: '#4C54BB',
+      iconBg: 'rgba(76, 84, 187, 0.1)',
       onPress: onStartSession,
     },
     {
-      label: 'Promises',
-      iconText: '🤝',
-      bgColor: 'bg-secondary/10',
-      textColor: 'text-secondary',
+      label: 'My Promise',
+      icon: 'auto-awesome' as const,
+      iconColor: '#006B64',
+      iconBg: 'rgba(0, 107, 100, 0.1)',
       onPress: onPromises,
     },
     {
       label: 'Chat',
-      iconText: '💬',
-      bgColor: 'bg-accent/10',
-      textColor: 'text-accent',
+      icon: 'chat-bubble' as const,
+      iconColor: '#7B5913',
+      iconBg: 'rgba(123, 89, 19, 0.1)',
       onPress: onChat,
     },
     {
-      label: 'Progress',
-      iconText: '📊',
-      bgColor: 'bg-warning/10',
-      textColor: 'text-warning',
-      onPress: onProgress,
+      label: 'Not feeling it?',
+      icon: 'sentiment-dissatisfied' as const,
+      iconColor: '#AC3149',
+      iconBg: 'rgba(172, 49, 73, 0.1)',
+      onPress: onBadDay,
     },
   ]
 
-  if (onBadDay) {
-    actions.push({
-      label: 'Not feeling it?',
-      iconText: '🫂',
-      bgColor: 'bg-danger/10',
-      textColor: 'text-danger',
-      onPress: onBadDay,
-    })
-  }
-
   return (
     <View className="px-5">
-      <Text className="text-base font-bold text-text mb-3">Quick Actions</Text>
-      <View className="flex-row gap-3">
-        {actions.map((action) => (
+      {/* Row 1 */}
+      <View className="flex-row" style={{ gap: 12, marginBottom: 12 }}>
+        {actions.slice(0, 2).map((action) => (
           <Pressable
             key={action.label}
             onPress={action.onPress}
-            className="flex-1 bg-surface rounded-2xl p-4 items-center shadow-sm shadow-black/5 active:opacity-70"
+            className="flex-1 bg-white rounded-2xl items-center justify-center active:opacity-80"
+            style={{ ...cardStyle, aspectRatio: 1, padding: 20 }}
             accessibilityRole="button"
             accessibilityLabel={action.label}
           >
             <View
-              className={`w-12 h-12 rounded-full ${action.bgColor} items-center justify-center mb-2`}
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: 24,
+                backgroundColor: action.iconBg,
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: 10,
+              }}
             >
-              <Text className={`${action.textColor} text-sm font-bold`}>{action.iconText}</Text>
+              <MaterialIcons name={action.icon} size={24} color={action.iconColor} />
             </View>
-            <Text className="text-xs text-text font-medium text-center">{action.label}</Text>
+            <Text style={{ fontSize: 13, fontWeight: '700', color: '#323331' }}>{action.label}</Text>
+          </Pressable>
+        ))}
+      </View>
+      {/* Row 2 */}
+      <View className="flex-row" style={{ gap: 12 }}>
+        {actions.slice(2, 4).map((action) => (
+          <Pressable
+            key={action.label}
+            onPress={action.onPress}
+            className="flex-1 bg-white rounded-2xl items-center justify-center active:opacity-80"
+            style={{ ...cardStyle, aspectRatio: 1, padding: 20 }}
+            accessibilityRole="button"
+            accessibilityLabel={action.label}
+          >
+            <View
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: 24,
+                backgroundColor: action.iconBg,
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: 10,
+              }}
+            >
+              <MaterialIcons name={action.icon} size={24} color={action.iconColor} />
+            </View>
+            <Text style={{ fontSize: 13, fontWeight: '700', color: '#323331' }}>{action.label}</Text>
           </Pressable>
         ))}
       </View>

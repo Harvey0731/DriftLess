@@ -126,6 +126,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       const { data, error } = await withTimeout(
         supabase.functions.invoke('ai-chat', {
           body: { message: content },
+          headers: { 'x-openai-key': process.env.EXPO_PUBLIC_OPENAI_API_KEY ?? '' },
         }),
         AI_CHAT_TIMEOUT_MS,
       )

@@ -1,94 +1,131 @@
-import React from 'react';
-import { View, Text, Pressable } from 'react-native';
+import React from 'react'
+import { View, Text, Pressable } from 'react-native'
+import { MaterialIcons } from '@expo/vector-icons'
 
 export interface Task {
-  id: string;
-  title: string;
-  estimatedMinutes: number;
-  difficulty: 'easy' | 'medium' | 'hard';
-  included: boolean;
+  id: string
+  title: string
+  estimatedMinutes: number
+  difficulty: 'easy' | 'medium' | 'hard'
+  included: boolean
 }
 
 interface TaskBreakdownProps {
-  tasks: Task[];
-  onToggle: (taskId: string) => void;
-  onMakeSmaller: (taskId: string) => void;
+  tasks: Task[]
+  onToggle: (taskId: string) => void
+  onMakeSmaller: (taskId: string) => void
 }
 
-function DifficultyIndicator({ difficulty }: { difficulty: Task['difficulty'] }) {
-  const config = {
-    easy: { label: 'Easy', bgClass: 'bg-green-100', textClass: 'text-green-700' },
-    medium: { label: 'Medium', bgClass: 'bg-yellow-100', textClass: 'text-yellow-700' },
-    hard: { label: 'Hard', bgClass: 'bg-orange-100', textClass: 'text-orange-700' },
-  };
-
-  const { label, bgClass, textClass } = config[difficulty];
-
-  return (
-    <View className={`rounded-full px-2 py-0.5 ${bgClass}`}>
-      <Text className={`text-xs font-medium ${textClass}`}>{label}</Text>
-    </View>
-  );
+const DIFFICULTY_CONFIG = {
+  easy: {
+    label: 'Easy',
+    icon: 'eco' as const,
+    color: '#006B64',
+    bg: 'rgba(0,107,100,0.12)',
+  },
+  medium: {
+    label: 'Medium',
+    icon: 'bolt' as const,
+    color: '#4C54BB',
+    bg: 'rgba(76,84,187,0.12)',
+  },
+  hard: {
+    label: 'Hard',
+    icon: 'whatshot' as const,
+    color: '#BA4900',
+    bg: 'rgba(186,73,0,0.12)',
+  },
 }
 
 export default function TaskBreakdown({ tasks, onToggle, onMakeSmaller }: TaskBreakdownProps) {
   return (
-    <View className="gap-3">
-      {tasks.map((task) => (
-        <View
-          key={task.id}
-          className={`rounded-2xl p-4 ${
-            task.included ? 'bg-white border border-gray-200' : 'bg-gray-50 border border-gray-100'
-          }`}
-        >
-          <View className="flex-row items-center justify-between mb-2">
-            <View className="flex-row items-center flex-1 gap-3">
-              {/* Checkbox */}
-              <Pressable
-                onPress={() => onToggle(task.id)}
-                className={`w-6 h-6 rounded-md border-2 items-center justify-center ${
-                  task.included
-                    ? 'bg-purple-500 border-purple-500'
-                    : 'bg-white border-gray-300'
-                }`}
-                accessibilityRole="checkbox"
-                accessibilityState={{ checked: task.included }}
-                accessibilityLabel={`Include task: ${task.title}`}
-              >
-                {task.included && (
-                  <Text className="text-white text-xs font-bold">{'✓'}</Text>
-                )}
-              </Pressable>
+    <View style={{ gap: 16 }}>
+      {tasks.map((task) => {
+        const diff = DIFFICULTY_CONFIG[task.difficulty]
+        return (
+          <View
+            key={task.id}
+            style={{
+              backgroundColor: '#FFFFFF',
+              borderRadius: 20,
+              padding: 20,
+              overflow: 'hidden',
+              shadowColor: '#323331',
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.06,
+              shadowRadius: 12,
+              elevation: 2,
+            }}
+          >
+            {/* Decorative background icon */}
+            <View style={{
+              position: 'absolute',
+              bottom: -10,
+              right: -10,
+              opacity: 0.05,
+            }}>
+              <MaterialIcons name={diff.icon} size={96} color={diff.color} />
+            </View>
 
-              {/* Task title */}
-              <Text
-                className={`text-base font-medium flex-1 ${
-                  task.included ? 'text-gray-800' : 'text-gray-400'
-                }`}
-                numberOfLines={2}
-              >
-                {task.title}
+            {/* Badge row — difficulty + time */}
+            <View style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 12,
+            }}>
+              <View style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 4,
+                backgroundColor: diff.bg,
+                borderRadius: 999,
+                paddingHorizontal: 10,
+                paddingVertical: 5,
+              }}>
+                <MaterialIcons name={diff.icon} size={13} color={diff.color} />
+                <Text style={{ fontSize: 12, fontWeight: '600', color: diff.color }}>
+                  {diff.label}
+                </Text>
+              </View>
+
+              <Text style={{ fontSize: 13, fontWeight: '500', color: '#5f5f5d' }}>
+                {task.estimatedMinutes} min
               </Text>
             </View>
-          </View>
 
-          <View className="flex-row items-center justify-between ml-9">
-            <View className="flex-row items-center gap-2">
-              <Text className="text-sm text-gray-500">{task.estimatedMinutes} min</Text>
-              <DifficultyIndicator difficulty={task.difficulty} />
-            </View>
+            {/* Task title */}
+            <Text style={{
+              fontSize: 18,
+              fontWeight: '700',
+              color: '#323331',
+              lineHeight: 26,
+              marginBottom: 16,
+            }}>
+              {task.title}
+            </Text>
 
+            {/* Make it smaller */}
             <Pressable
               onPress={() => onMakeSmaller(task.id)}
-              className="bg-purple-50 rounded-lg px-3 py-1.5"
+              style={({ pressed }) => ({
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 5,
+                alignSelf: 'flex-start',
+                opacity: pressed ? 0.7 : 1,
+              })}
               accessibilityRole="button"
               accessibilityLabel={`Make task smaller: ${task.title}`}
             >
-              <Text className="text-purple-600 text-xs font-medium">Make it smaller</Text>
+              <MaterialIcons name="unfold-less" size={16} color="#4C54BB" />
+              <Text style={{ fontSize: 13, fontWeight: '600', color: '#4C54BB' }}>
+                Make it smaller
+              </Text>
             </Pressable>
           </View>
-        </View>
-      ))}
+        )
+      })}
     </View>
-  );
+  )
 }

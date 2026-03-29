@@ -92,19 +92,23 @@ export async function endSession(
 }
 
 /**
- * Get recent completed or abandoned sessions for a user.
+ * Get recent completed sessions for a user, with task title joined in.
  */
-export async function getRecentSessions(userId: string, limit: number): Promise<FocusSession[]> {
-  // M8: Only return completed sessions
+export async function getRecentSessions(
+  userId: string,
+  limit: number,
+): Promise<(FocusSession & { taskName?: string })[]> {
   const { data, error } = await supabase
     .from('focus_sessions')
-    .select('*')
+    .select('*, tasks(title)')
     .eq('user_id', userId)
     .eq('status', 'completed')
     .order('started_at', { ascending: false })
     .limit(limit)
   if (error) throw new Error(`Failed to fetch recent sessions: ${error.message}`)
-  return data as unknown as FocusSession[]
+  return ((data ?? []) as unknown as (FocusSession & { tasks?: { title: string } | null })[]).map(
+    (s) => ({ ...s, taskName: s.tasks?.title ?? undefined }),
+  )
 }
 
 export interface SessionStats {

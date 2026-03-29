@@ -29,10 +29,8 @@ export async function startCheckIn(
 ): Promise<DailyCheckIn> {
   // SEC: user_id is derived from the JWT server-side, NOT passed in the body.
   const { data, error } = await supabase.functions.invoke('ai-checkin', {
-    body: {
-      energyLevel,
-      goalId,
-    },
+    body: { energyLevel, goalId },
+    headers: { 'x-openai-key': process.env.EXPO_PUBLIC_OPENAI_API_KEY ?? '' },
   })
   if (error) throw new Error(`Check-in failed: ${error.message}`)
 

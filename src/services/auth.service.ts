@@ -12,20 +12,24 @@ export async function signUp(email: string, password: string, displayName?: stri
   })
   if (error) throw new Error(`Sign-up failed: ${error.message}`)
 
-  // Create the initial profile row keyed to the new user
+  // Ensure a profile row exists — the DB trigger may have already created one,
+  // so use upsert to avoid duplicate-key errors.
   if (data.user) {
-    const { error: profileError } = await supabase.from('profiles').insert({
-      id: data.user.id,
-      display_name: displayName ?? null,
-      onboarding_done: false,
-      notification_hour: 9,
-      celebration_style: 'confetti',
-      theme: 'system',
-      streak_shields: 0,
-      current_streak: 0,
-      longest_streak: 0,
-      trust_score: 50,
-    })
+    const { error: profileError } = await supabase.from('profiles').upsert(
+      {
+        id: data.user.id,
+        display_name: displayName ?? null,
+        onboarding_done: false,
+        notification_hour: 9,
+        celebration_style: 'confetti',
+        theme: 'system',
+        streak_shields: 0,
+        current_streak: 0,
+        longest_streak: 0,
+        trust_score: 50,
+      },
+      { onConflict: 'id' },
+    )
     if (profileError) throw new Error(`Profile creation failed: ${profileError.message}`)
   }
 

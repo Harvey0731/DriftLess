@@ -17,10 +17,8 @@ export async function sendMessage(
 ): Promise<ChatResponse> {
   // SEC: user_id is derived from the JWT server-side, NOT passed in the body.
   const { data, error } = await supabase.functions.invoke('ai-chat', {
-    body: {
-      message: content,
-      context,
-    },
+    body: { message: content, context },
+    headers: { 'x-openai-key': process.env.EXPO_PUBLIC_OPENAI_API_KEY ?? '' },
   })
   if (error) throw new Error(`Failed to send message: ${error.message}`)
   return data as ChatResponse

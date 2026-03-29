@@ -57,10 +57,25 @@ function computeElapsed(ts: TimerState): number {
 }
 
 /** Get cached user ID from authStore (no network call). */
-function getCachedUserId(): string {
-  const userId = useAuthStore.getState().user?.id
+async function getAuthenticatedUserId(): Promise<string> {
+  // Prefer the Zustand-cached user (already in memory)
+  const cached = useAuthStore.getState().user?.id
+  if (cached) return cached
+
+  // Fallback: read directly from Supabase (handles HMR / cold-start race)
+  const { data } = await supabase.auth.getSession()
+  const userId = data.session?.user?.id
   if (!userId) throw new Error('Not authenticated')
+
+  // Back-fill the store so subsequent calls hit the fast path
+  useAuthStore.setState({ user: data.session!.user, session: data.session, isAuthenticated: true, isLoading: false })
   return userId
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+function toUuidOrNull(value: string | null | undefined): string | null {
+  if (!value || !UUID_RE.test(value)) return null
+  return value
 }
 
 // ─── Store ──────────────────────────────────────────────────────────────────
@@ -75,12 +90,12 @@ export const useSessionStore = create<SessionStore>()((set, get) => ({
   // actions
 
   startSession: async (taskId, plannedMins, checkInId?: string) => {
-    const userId = getCachedUserId()
+    const userId = await getAuthenticatedUserId()
 
     const insertData = {
       user_id: userId,
-      task_id: taskId,
-      check_in_id: checkInId ?? null,
+      task_id: toUuidOrNull(taskId),
+      check_in_id: toUuidOrNull(checkInId),
       started_at: new Date().toISOString(),
       planned_mins: plannedMins,
       actual_secs: 0,
@@ -226,7 +241,7 @@ export const useSessionStore = create<SessionStore>()((set, get) => ({
     const { timerState, currentSession } = get()
     if (!currentSession) throw new Error('No active session to end')
 
-    const userId = getCachedUserId()
+    const userId = await getAuthenticatedUserId()
 
     // Final elapsed calculation
     const elapsed = timerState ? computeElapsed(timerState) : 0

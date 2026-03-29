@@ -1,6 +1,7 @@
 import React from 'react'
 import { View, Text } from 'react-native'
 import { Tabs, useRouter } from 'expo-router'
+import { MaterialIcons } from '@expo/vector-icons'
 import { ErrorBoundary } from '@/src/components/ErrorBoundary'
 
 export default function TabLayout() {
@@ -11,27 +12,29 @@ export default function TabLayout() {
       <Tabs
         screenOptions={{
           headerShown: false,
-          tabBarActiveTintColor: '#8B5CF6',
-          tabBarInactiveTintColor: '#9CA3AF',
+          tabBarActiveTintColor: '#8B93FF',
+          tabBarInactiveTintColor: '#A8A29E',
           tabBarStyle: {
-            backgroundColor: '#FFFFFF',
+            backgroundColor: '#F6F3F1',
             borderTopWidth: 0,
-            borderTopLeftRadius: 24,
-            borderTopRightRadius: 24,
-            height: 88,
-            paddingBottom: 28,
+            borderTopLeftRadius: 32,
+            borderTopRightRadius: 32,
+            height: 80,
+            paddingBottom: 20,
             paddingTop: 10,
-            shadowColor: '#000000',
-            shadowOffset: { width: 0, height: -4 },
-            shadowOpacity: 0.08,
-            shadowRadius: 12,
+            shadowColor: '#323331',
+            shadowOffset: { width: 0, height: -10 },
+            shadowOpacity: 0.04,
+            shadowRadius: 40,
             elevation: 10,
             position: 'absolute',
           },
           tabBarLabelStyle: {
-            fontSize: 11,
-            fontWeight: '600',
+            fontSize: 10,
+            fontWeight: '500',
             marginTop: 2,
+            letterSpacing: 1,
+            textTransform: 'uppercase',
           },
         }}
       >
@@ -39,63 +42,53 @@ export default function TabLayout() {
           name="index"
           options={{
             title: 'Home',
-            tabBarIcon: () => <Text style={{ fontSize: 20 }}>🏠</Text>,
+            tabBarIcon: ({ color }) => (
+              <MaterialIcons name="home" size={24} color={color} />
+            ),
           }}
         />
         <Tabs.Screen
           name="progress"
           options={{
             title: 'Progress',
-            tabBarIcon: () => <Text style={{ fontSize: 20 }}>📊</Text>,
+            tabBarIcon: ({ color }) => (
+              <MaterialIcons name="analytics" size={24} color={color} />
+            ),
           }}
         />
         <Tabs.Screen
-          name="session"
+          name="promises"
           options={{
-            title: '',
-            tabBarIcon: () => (
-              <View
-                style={{
-                  width: 56,
-                  height: 56,
-                  borderRadius: 28,
-                  backgroundColor: '#8B5CF6',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  marginBottom: 24,
-                  shadowColor: '#8B5CF6',
-                  shadowOffset: { width: 0, height: 4 },
-                  shadowOpacity: 0.35,
-                  shadowRadius: 8,
-                  elevation: 6,
-                }}
-              >
-                <Text style={{ color: '#FFFFFF', fontSize: 28, fontWeight: '700', marginTop: -2 }}>
-                  +
-                </Text>
-              </View>
+            title: 'Promises',
+            tabBarIcon: ({ color }) => (
+              <MaterialIcons name="auto-awesome" size={24} color={color} />
             ),
-            tabBarLabel: () => null,
-          }}
-          listeners={{
-            tabPress: (e) => {
-              e.preventDefault()
-              router.push('/timer' as never)
-            },
           }}
         />
         <Tabs.Screen
           name="chat"
           options={{
-            title: 'Chat',
-            tabBarIcon: () => <Text style={{ fontSize: 20 }}>💬</Text>,
+            title: 'Toolbox',
+            tabBarIcon: ({ color }) => (
+              <MaterialIcons name="healing" size={24} color={color} />
+            ),
+          }}
+          listeners={{
+            tabPress: (e) => {
+              e.preventDefault()
+              router.push('/bad-day-toolbox' as never)
+            },
           }}
         />
         <Tabs.Screen
+          name="session"
+          options={{ href: null }}
+        />
+        {/* Hide settings from tab bar but keep the route */}
+        <Tabs.Screen
           name="settings"
           options={{
-            title: 'Settings',
-            tabBarIcon: () => <Text style={{ fontSize: 20 }}>⚙️</Text>,
+            href: null,
           }}
         />
       </Tabs>

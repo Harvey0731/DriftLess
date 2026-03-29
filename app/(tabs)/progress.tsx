@@ -1,25 +1,28 @@
-import React, { useState, useCallback, useMemo } from 'react'
+import React, { useState, useCallback, useMemo, useEffect } from 'react'
 import {
   View,
   Text,
-  TouchableOpacity,
-  FlatList,
+  Pressable,
+  ScrollView,
   RefreshControl,
   ActivityIndicator,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useFocusEffect } from 'expo-router'
+import { MaterialIcons } from '@expo/vector-icons'
+import { useFocusEffect, useRouter } from 'expo-router'
+import Svg, { Polyline, Circle, Defs, LinearGradient as SvgGradient, Stop, Path } from 'react-native-svg'
+import { computeStreak } from '@/src/utils/time'
 import { useAuthStore } from '@/src/stores/authStore'
 import { getRecentSessions, getSessionStats } from '@/src/services/sessions.service'
 import type { SessionStats } from '@/src/services/sessions.service'
+import { getPromiseHistory } from '@/src/services/promises.service'
 import { supabase } from '@/src/lib/supabase'
 import { captureError } from '@/src/lib/sentry'
-import type { FocusSession, Milestone as MilestoneRow } from '@/src/types/database'
+import type { FocusSession, Milestone as MilestoneRow, PromiseRecord, DailyCheckIn } from '@/src/types/database'
 
 // --- Types ---
 
 type Period = 'week' | 'month' | 'all'
-type Rating = 'great' | 'good' | 'ok' | 'struggled'
 
 interface ChartDay {
   day: string
@@ -30,7 +33,7 @@ interface RatingRow {
   label: string
   count: number
   percentage: number
-  colorClass: string
+  color: string
 }
 
 type MilestoneStatus = 'earned' | 'in-progress' | 'locked'
@@ -41,37 +44,23 @@ interface MilestoneDisplay {
   progress?: string
 }
 
-// --- Rating helpers ---
+// --- Rating config (matches mockup labels) ---
 
-const RATING_BADGE_BG: Record<Rating, string> = {
-  great: 'bg-primary',
-  good: 'bg-accent',
-  ok: 'bg-warning',
-  struggled: 'bg-danger',
+const RATING_CONFIG: Record<number, { label: string; color: string }> = {
+  4: { label: 'Nailed it',       color: '#006B64' },
+  3: { label: 'Solid',           color: '#7FE6DB' },
+  2: { label: 'Got started',     color: '#FED07F' },
+  1: { label: 'Showed up anyway',color: 'rgba(179,178,175,0.55)' },
 }
 
-const RATING_LABELS: Record<Rating, string> = {
-  great: 'Great',
-  good: 'Good',
-  ok: 'OK',
-  struggled: 'Struggled',
-}
-
-const RATING_NUM_TO_KEY: Record<number, Rating> = {
-  4: 'great',
-  3: 'good',
-  2: 'ok',
-  1: 'struggled',
-}
-
-// --- Utility functions ---
+// --- Utility functions (unchanged logic) ---
 
 function getStartOfPeriod(period: Period): Date | null {
   const now = new Date()
   if (period === 'week') {
     const start = new Date(now)
     const dayOfWeek = start.getDay()
-    const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1 // Monday = start of week
+    const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1
     start.setDate(start.getDate() - diff)
     start.setHours(0, 0, 0, 0)
     return start
@@ -79,7 +68,7 @@ function getStartOfPeriod(period: Period): Date | null {
   if (period === 'month') {
     return new Date(now.getFullYear(), now.getMonth(), 1)
   }
-  return null // 'all'
+  return null
 }
 
 function filterSessionsByPeriod(sessions: FocusSession[], period: Period): FocusSession[] {
@@ -89,9 +78,10 @@ function filterSessionsByPeriod(sessions: FocusSession[], period: Period): Focus
 }
 
 function buildWeeklyChart(sessions: FocusSession[]): ChartDay[] {
-  const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+  const dayNames = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
+  const keys = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
   const totals: Record<string, number> = {}
-  for (const d of dayNames) totals[d] = 0
+  for (const k of keys) totals[k] = 0
 
   const now = new Date()
   const startOfWeek = new Date(now)
@@ -103,61 +93,107 @@ function buildWeeklyChart(sessions: FocusSession[]): ChartDay[] {
   for (const s of sessions) {
     const sessionDate = new Date(s.started_at)
     if (sessionDate >= startOfWeek) {
-      const jsDay = sessionDate.getDay() // 0=Sun, 1=Mon, ...
+      const jsDay = sessionDate.getDay()
       const idx = jsDay === 0 ? 6 : jsDay - 1
-      totals[dayNames[idx]] += Math.round((s.actual_secs ?? 0) / 60)
+      totals[keys[idx]] += Math.round((s.actual_secs ?? 0) / 60)
     }
   }
 
-  return dayNames.map((day) => ({ day, minutes: totals[day] }))
+  return keys.map((key, i) => ({ day: dayNames[i], minutes: totals[key] }))
 }
 
 function computeRatingDistribution(ratingDist: Record<number, number>): RatingRow[] {
-  const rows: { rating: number; label: string; colorClass: string }[] = [
-    { rating: 4, label: 'Great', colorClass: 'bg-primary' },
-    { rating: 3, label: 'Good', colorClass: 'bg-accent' },
-    { rating: 2, label: 'OK', colorClass: 'bg-warning' },
-    { rating: 1, label: 'Struggled', colorClass: 'bg-danger' },
-  ]
-
   const total = Object.values(ratingDist).reduce((sum, c) => sum + c, 0)
-
-  return rows.map((r) => {
-    const count = ratingDist[r.rating] ?? 0
+  return [4, 3, 2, 1].map((r) => {
+    const cfg = RATING_CONFIG[r]
+    const count = ratingDist[r] ?? 0
     const percentage = total > 0 ? Math.round((count / total) * 100) : 0
-    return { label: r.label, count, percentage, colorClass: r.colorClass }
+    return { label: cfg.label, count, percentage, color: cfg.color }
   })
 }
 
-function computeInsights(sessions: FocusSession[], stats: SessionStats): string[] {
-  const insights: string[] = []
-
-  if (sessions.length === 0) return insights
-
-  // Best day of week
-  const dayTotals: Record<string, number> = {}
+function computeBestDay(sessions: FocusSession[]): string | null {
+  if (sessions.length === 0) return null
   const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+  const totals: Record<string, number> = {}
   for (const s of sessions) {
     const d = dayNames[new Date(s.started_at).getDay()]
-    dayTotals[d] = (dayTotals[d] ?? 0) + (s.actual_secs ?? 0)
+    totals[d] = (totals[d] ?? 0) + (s.actual_secs ?? 0)
   }
-  const bestDay = Object.entries(dayTotals).sort((a, b) => b[1] - a[1])[0]
-  if (bestDay) {
-    insights.push(`Most productive day: ${bestDay[0]}`)
+  const sorted = Object.entries(totals).sort((a, b) => b[1] - a[1])
+  return sorted[0]?.[0] ?? null
+}
+
+function computeTopHardReason(checkIns: { hard_reason: string | null }[]): string | null {
+  const counts: Record<string, number> = {}
+  for (const c of checkIns) {
+    if (c.hard_reason) counts[c.hard_reason] = (counts[c.hard_reason] ?? 0) + 1
+  }
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1])
+  if (!sorted[0]) return null
+  const key = sorted[0][0]
+  const labels: Record<string, string> = {
+    unclear_start: 'Not sure where to start',
+    overwhelmed: 'Feeling overwhelmed',
+    fear_of_failure: "Scared it won't be good enough",
+    low_motivation: 'Just no motivation',
+  }
+  return labels[key] ?? key
+}
+
+function computePeakHour(sessions: FocusSession[]): string | null {
+  if (sessions.length === 0) return null
+  const buckets: Record<string, number> = { Morning: 0, Afternoon: 0, Evening: 0 }
+  for (const s of sessions) {
+    const h = new Date(s.started_at).getHours()
+    if (h < 12) buckets['Morning'] += s.actual_secs ?? 0
+    else if (h < 17) buckets['Afternoon'] += s.actual_secs ?? 0
+    else buckets['Evening'] += s.actual_secs ?? 0
+  }
+  return Object.entries(buckets).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null
+}
+
+interface SparklinePoint {
+  day: string   // e.g. 'M', 'T', …
+  score: number // 0-100
+}
+
+function buildTrustSparkline(promises: PromiseRecord[]): SparklinePoint[] {
+  const dayLetters = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+  const result: SparklinePoint[] = []
+
+  for (let i = 6; i >= 0; i--) {
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - i)
+    cutoff.setHours(23, 59, 59, 999)
+    const cutoffStr = cutoff.toISOString().slice(0, 10)
+
+    const since30 = new Date(cutoff)
+    since30.setDate(since30.getDate() - 30)
+    const since30Str = since30.toISOString().slice(0, 10)
+
+    const relevant = promises.filter(
+      (p) => p.promise_date >= since30Str && p.promise_date <= cutoffStr,
+    )
+    const resolved = relevant.filter((p) => p.kept !== null)
+    const kept = resolved.filter((p) => p.kept === true)
+    const keptRatio = resolved.length > 0 ? kept.length / resolved.length : 0.5
+
+    const sorted = [...resolved].sort((a, b) => b.promise_date.localeCompare(a.promise_date))
+    let streak = 0
+    for (const p of sorted) {
+      if (p.kept) streak++
+      else break
+    }
+    const streakBonus = Math.min(streak / 30, 1)
+    const activityBonus = Math.min(relevant.length / 30, 1)
+    const score = Math.max(0, Math.min(100, Math.round(keptRatio * 60 + streakBonus * 20 + activityBonus * 20)))
+
+    const dayIdx = cutoff.getDay()
+    result.push({ day: dayLetters[dayIdx], score })
   }
 
-  // Avg session duration
-  const avgMins = Math.round(stats.avgDurationSecs / 60)
-  insights.push(`Average session: ${avgMins} min`)
-
-  // Total sessions
-  insights.push(`Total sessions: ${stats.totalSessions}`)
-
-  // Total focus hours
-  const totalHrs = (stats.totalTimeSecs / 3600).toFixed(1)
-  insights.push(`Total focus time: ${totalHrs} hrs`)
-
-  return insights
+  return result
 }
 
 function computeMilestones(
@@ -169,88 +205,124 @@ function computeMilestones(
 
   const milestones: MilestoneDisplay[] = []
 
-  // First Session
   if (earnedTypes.has('first_session') || stats.totalSessions >= 1) {
     milestones.push({ title: 'First Session', status: 'earned' })
   } else {
     milestones.push({ title: 'First Session', status: 'locked', progress: '0 / 1' })
   }
 
-  // 10 Sessions
   if (earnedTypes.has('sessions_10') || stats.totalSessions >= 10) {
     milestones.push({ title: '10 Sessions', status: 'earned' })
-  } else if (stats.totalSessions > 0) {
-    milestones.push({
-      title: '10 Sessions',
-      status: 'in-progress',
-      progress: `${stats.totalSessions} / 10`,
-    })
   } else {
-    milestones.push({ title: '10 Sessions', status: 'locked', progress: '0 / 10' })
+    milestones.push({
+      title: '30-Day Streak',
+      status: 'in-progress',
+      progress: `${stats.totalSessions}/30 days`,
+    })
   }
 
-  // 25 Sessions
-  if (earnedTypes.has('sessions_25') || stats.totalSessions >= 25) {
-    milestones.push({ title: '25 Sessions', status: 'earned' })
-  } else if (stats.totalSessions > 0) {
-    milestones.push({
-      title: '25 Sessions',
-      status: 'in-progress',
-      progress: `${stats.totalSessions} / 25`,
-    })
-  } else {
-    milestones.push({ title: '25 Sessions', status: 'locked', progress: '0 / 25' })
-  }
-
-  // 10 Hours
   if (earnedTypes.has('hours_10') || totalHrs >= 10) {
     milestones.push({ title: '10 Hours', status: 'earned' })
-  } else if (totalHrs > 0) {
+  } else {
     milestones.push({
       title: '10 Hours',
       status: 'in-progress',
       progress: `${totalHrs.toFixed(1)} / 10 hrs`,
     })
-  } else {
-    milestones.push({ title: '10 Hours', status: 'locked', progress: '0 / 10 hrs' })
-  }
-
-  // 50 Hours
-  if (earnedTypes.has('hours_50') || totalHrs >= 50) {
-    milestones.push({ title: '50 Hours', status: 'earned' })
-  } else if (totalHrs > 0) {
-    milestones.push({
-      title: '50 Hours',
-      status: 'in-progress',
-      progress: `${totalHrs.toFixed(1)} / 50 hrs`,
-    })
-  } else {
-    milestones.push({ title: '50 Hours', status: 'locked', progress: '0 / 50 hrs' })
   }
 
   return milestones
 }
 
-function getRatingKey(session: FocusSession): Rating {
-  if (session.rating_label) {
-    const lower = session.rating_label.toLowerCase() as Rating
-    if (lower in RATING_BADGE_BG) return lower
-  }
-  if (session.rating !== null && session.rating in RATING_NUM_TO_KEY) {
-    return RATING_NUM_TO_KEY[session.rating]
-  }
-  return 'ok' // fallback
-}
-
-function getSessionTaskName(session: FocusSession): string {
-  if (!session.task_id) return 'Untitled Session'
-  // H21: If the task_id looks like a UUID, show a friendly name instead
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-  if (uuidRegex.test(session.task_id)) return 'Focus Session'
-  return session.task_id.substring(0, 50)
-}
-
 // --- Sub-components ---
+
+function TrustScoreSparkline({ data, currentScore }: { data: SparklinePoint[]; currentScore: number }) {
+  const W = 280
+  const H = 72
+  const PAD = 8
+
+  if (data.length < 2) return null
+
+  const scores = data.map((d) => d.score)
+  const minS = Math.max(0, Math.min(...scores) - 5)
+  const maxS = Math.min(100, Math.max(...scores) + 5)
+  const range = maxS - minS || 1
+
+  const xStep = (W - PAD * 2) / (data.length - 1)
+  const toX = (i: number) => PAD + i * xStep
+  const toY = (s: number) => H - PAD - ((s - minS) / range) * (H - PAD * 2)
+
+  const points = data.map((d, i) => `${toX(i)},${toY(d.score)}`).join(' ')
+
+  // filled area path
+  const areaPath =
+    `M ${toX(0)},${toY(data[0].score)} ` +
+    data.slice(1).map((d, i) => `L ${toX(i + 1)},${toY(d.score)}`).join(' ') +
+    ` L ${toX(data.length - 1)},${H} L ${toX(0)},${H} Z`
+
+  const lastX = toX(data.length - 1)
+  const lastY = toY(data[data.length - 1].score)
+
+  return (
+    <View style={{
+      backgroundColor: '#FFFFFF',
+      borderRadius: 32,
+      padding: 24,
+      marginBottom: 24,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.05,
+      shadowRadius: 4,
+      elevation: 1,
+    }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <View>
+          <Text style={{ fontSize: 17, fontWeight: '700', color: '#323331' }}>Trust Score</Text>
+          <Text style={{ fontSize: 12, color: '#5f5f5d', marginTop: 2 }}>7-day history</Text>
+        </View>
+        <View style={{
+          backgroundColor: 'rgba(76,84,187,0.1)',
+          borderRadius: 999,
+          paddingHorizontal: 14,
+          paddingVertical: 6,
+        }}>
+          <Text style={{ fontSize: 18, fontWeight: '800', color: '#4C54BB' }}>{currentScore}</Text>
+        </View>
+      </View>
+
+      <Svg width={W} height={H}>
+        <Defs>
+          <SvgGradient id="sparkFill" x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0%" stopColor="#4C54BB" stopOpacity={0.15} />
+            <Stop offset="100%" stopColor="#4C54BB" stopOpacity={0} />
+          </SvgGradient>
+        </Defs>
+        {/* Filled area */}
+        <Path d={areaPath} fill="url(#sparkFill)" />
+        {/* Line */}
+        <Polyline
+          points={points}
+          fill="none"
+          stroke="#4C54BB"
+          strokeWidth={2}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+        {/* Latest dot */}
+        <Circle cx={lastX} cy={lastY} r={4} fill="#4C54BB" />
+        <Circle cx={lastX} cy={lastY} r={7} fill="rgba(76,84,187,0.2)" />
+      </Svg>
+
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+        {data.map((d, i) => (
+          <Text key={i} style={{ fontSize: 10, fontWeight: '500', color: '#b3b2af', width: xStep, textAlign: 'center' }}>
+            {d.day}
+          </Text>
+        ))}
+      </View>
+    </View>
+  )
+}
 
 function PeriodSelector({
   selected,
@@ -266,216 +338,154 @@ function PeriodSelector({
   ]
 
   return (
-    <View className="flex-row bg-white rounded-xl p-1 mx-5 mb-4">
-      {periods.map((p) => (
-        <TouchableOpacity
-          key={p.key}
-          onPress={() => onSelect(p.key)}
-          className={`flex-1 py-2.5 rounded-lg items-center ${
-            selected === p.key ? 'bg-primary' : ''
-          }`}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityLabel={`Show ${p.label.toLowerCase()} data`}
-          accessibilityState={{ selected: selected === p.key }}
-        >
-          <Text
-            className={`text-sm font-semibold ${
-              selected === p.key ? 'text-white' : 'text-textSecondary'
-            }`}
+    <View style={{
+      flexDirection: 'row',
+      borderBottomWidth: 1,
+      borderBottomColor: 'rgba(179,178,175,0.15)',
+      marginBottom: 24,
+    }}>
+      {periods.map((p) => {
+        const isActive = selected === p.key
+        return (
+          <Pressable
+            key={p.key}
+            onPress={() => onSelect(p.key)}
+            style={{ paddingBottom: 12, marginRight: 32 }}
+            accessibilityRole="button"
+            accessibilityState={{ selected: isActive }}
           >
-            {p.label}
-          </Text>
-        </TouchableOpacity>
-      ))}
+            <Text style={{
+              fontSize: 14,
+              fontWeight: isActive ? '600' : '500',
+              color: isActive ? '#4C54BB' : '#5f5f5d',
+            }}>
+              {p.label}
+            </Text>
+            {isActive && (
+              <View style={{
+                position: 'absolute',
+                bottom: 0,
+                left: 0,
+                right: 0,
+                height: 2,
+                backgroundColor: '#4C54BB',
+                borderRadius: 999,
+              }} />
+            )}
+          </Pressable>
+        )
+      })}
     </View>
   )
 }
 
-function StatCard({
-  title,
-  value,
-  unit,
-  trend,
-  trendUp,
-}: {
-  title: string
-  value: string
-  unit?: string
-  trend: string
-  trendUp: boolean
+type Trend = 'up' | 'down' | 'flat'
+
+function TrendArrow({ trend }: { trend: Trend }) {
+  const icon =
+    trend === 'up' ? 'trending-up' :
+    trend === 'down' ? 'trending-down' : 'trending-flat'
+  // Up = teal accent, down/flat = neutral grey — no alarm colors
+  const color = trend === 'up' ? '#006B64' : '#b3b2af'
+  return <MaterialIcons name={icon} size={16} color={color} />
+}
+
+function StatCards({ totalHrs, sessionCount, avgMin, trends }: {
+  totalHrs: string
+  sessionCount: number
+  avgMin: number
+  trends: [Trend, Trend, Trend]
 }) {
+  const cards = [
+    { label: 'Total Focus', value: totalHrs + 'h',       trend: trends[0] },
+    { label: 'Sessions',    value: String(sessionCount),  trend: trends[1] },
+    { label: 'Avg. Session', value: avgMin + 'm',         trend: trends[2] },
+  ]
+
   return (
-    <View className="flex-1 bg-white rounded-2xl p-3.5 mx-1">
-      <Text className="text-xs text-textSecondary mb-1">{title}</Text>
-      <View className="flex-row items-baseline">
-        <Text className="text-xl font-bold text-text">{value}</Text>
-        {unit ? <Text className="text-xs text-textSecondary ml-1">{unit}</Text> : null}
-      </View>
-      <View className="flex-row items-center mt-1.5">
-        <Text className={`text-xs font-medium ${trendUp ? 'text-accent' : 'text-danger'}`}>
-          {trendUp ? '^ ' : 'v '}
-          {trend}
-        </Text>
-      </View>
+    <View style={{ flexDirection: 'row', gap: 10, marginBottom: 24 }}>
+      {cards.map((card) => (
+        <View key={card.label} style={{
+          flex: 1,
+          backgroundColor: '#FFFFFF',
+          borderRadius: 32,
+          padding: 16,
+          height: 128,
+          justifyContent: 'space-between',
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 1 },
+          shadowOpacity: 0.05,
+          shadowRadius: 4,
+          elevation: 1,
+        }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <Text style={{
+              fontSize: 10,
+              fontWeight: '700',
+              color: '#5f5f5d',
+              letterSpacing: 0.8,
+              textTransform: 'uppercase',
+              flex: 1,
+            }}>
+              {card.label}
+            </Text>
+            <TrendArrow trend={card.trend} />
+          </View>
+          <Text style={{ fontSize: 22, fontWeight: '800', color: '#323331' }}>
+            {card.value}
+          </Text>
+        </View>
+      ))}
     </View>
   )
 }
 
 function FocusChart({ data }: { data: ChartDay[] }) {
   const maxMinutes = Math.max(...data.map((d) => d.minutes), 1)
-  const avgMinutes = data.reduce((sum, d) => sum + d.minutes, 0) / data.length
-  const chartHeight = 140
-  const avgLineTop =
-    maxMinutes > 0 ? chartHeight - (avgMinutes / maxMinutes) * chartHeight : chartHeight
+  const CHART_HEIGHT = 128
 
   return (
-    <View className="bg-white rounded-2xl p-4 mx-5 mb-4">
-      <Text className="text-base font-semibold text-text mb-3">Focus Time</Text>
-
-      <View style={{ height: chartHeight, position: 'relative' }}>
-        {/* Average line */}
-        <View
-          style={{
-            position: 'absolute',
-            top: avgLineTop,
-            left: 0,
-            right: 0,
-            height: 1,
-            borderTopWidth: 1,
-            borderStyle: 'dashed',
-            borderColor: '#10B981',
-            zIndex: 1,
-          }}
-        />
-
-        {/* Bars */}
-        <View className="flex-row items-end justify-between px-2 h-full">
-          {data.map((item) => {
-            const barHeight = Math.max((item.minutes / maxMinutes) * chartHeight, 4)
-            const isGoodSession = item.minutes >= 25
-            return (
-              <View key={item.day} className="items-center flex-1 mx-0.5">
-                <Text className="text-[10px] text-textSecondary mb-1">{item.minutes}m</Text>
-                <View
-                  style={{ height: barHeight, width: 24 }}
-                  className={`rounded-t-md ${isGoodSession ? 'bg-primary' : 'bg-secondary'}`}
-                />
-              </View>
-            )
-          })}
-        </View>
+    <View style={{
+      backgroundColor: '#FFFFFF',
+      borderRadius: 32,
+      padding: 24,
+      marginBottom: 24,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.05,
+      shadowRadius: 4,
+      elevation: 1,
+    }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
+        <Text style={{ fontSize: 17, fontWeight: '700', color: '#323331' }}>Focus Minutes</Text>
+        <Text style={{ fontSize: 12, fontWeight: '500', color: '#5f5f5d' }}>Last 7 Days</Text>
       </View>
 
-      {/* X-axis labels */}
-      <View className="flex-row justify-between px-2 mt-2">
-        {data.map((item) => (
-          <View key={item.day} className="flex-1 items-center mx-0.5">
-            <Text className="text-[10px] text-textSecondary">{item.day}</Text>
-          </View>
-        ))}
-      </View>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
+        {data.map((item, i) => {
+          const pct = maxMinutes > 0 ? item.minutes / maxMinutes : 0
+          const barH = Math.max(pct * CHART_HEIGHT, 6)
 
-      {/* Legend */}
-      <View className="flex-row items-center mt-3 justify-center">
-        <View className="w-3 h-3 rounded-sm bg-primary mr-1.5" />
-        <Text className="text-[10px] text-textSecondary mr-3">25+ min</Text>
-        <View className="w-3 h-3 rounded-sm bg-secondary mr-1.5" />
-        <Text className="text-[10px] text-textSecondary mr-3">Under 25 min</Text>
-        <View
-          style={{ width: 12, height: 2, backgroundColor: '#10B981', borderRadius: 1 }}
-          className="mr-1.5"
-        />
-        <Text className="text-[10px] text-textSecondary">Avg ({Math.round(avgMinutes)}m)</Text>
-      </View>
-    </View>
-  )
-}
-
-function SessionBreakdown({ distribution }: { distribution: RatingRow[] }) {
-  return (
-    <View className="bg-white rounded-2xl p-4 mx-5 mb-4">
-      <Text className="text-base font-semibold text-text mb-3">How your sessions have felt</Text>
-      {distribution.map((item) => (
-        <View key={item.label} className="mb-3">
-          <View className="flex-row justify-between mb-1">
-            <Text className="text-sm text-text">{item.label}</Text>
-            <Text className="text-sm text-textSecondary">
-              {item.count} ({item.percentage}%)
-            </Text>
-          </View>
-          <View className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
-            <View
-              style={{ width: `${item.percentage}%` }}
-              className={`h-full rounded-full ${item.colorClass}`}
-            />
-          </View>
-        </View>
-      ))}
-    </View>
-  )
-}
-
-function InsightsSection({ insights }: { insights: string[] }) {
-  if (insights.length === 0) return null
-
-  return (
-    <View className="mx-5 mb-4">
-      <Text className="text-base font-semibold text-text mb-3">Insights</Text>
-      <View className="flex-row flex-wrap justify-between">
-        {insights.map((insight, index) => (
-          <View key={index} className="bg-white rounded-xl p-3 mb-2" style={{ width: '48%' }}>
-            <Text className="text-sm text-text leading-5">{insight}</Text>
-          </View>
-        ))}
-      </View>
-    </View>
-  )
-}
-
-function MilestonesSection({ milestones }: { milestones: MilestoneDisplay[] }) {
-  if (milestones.length === 0) return null
-
-  return (
-    <View className="mx-5 mb-4">
-      <Text className="text-base font-semibold text-text mb-3">Milestones</Text>
-      <View className="flex-row flex-wrap">
-        {milestones.map((milestone) => {
-          const isEarned = milestone.status === 'earned'
-          const isLocked = milestone.status === 'locked'
           return (
-            <View
-              key={milestone.title}
-              className={`rounded-xl p-3 mr-2 mb-2 items-center ${
-                isEarned
-                  ? 'bg-primary/10 border border-primary/30'
-                  : 'bg-white border border-gray-100'
-              }`}
-              style={{ width: '30%' }}
-            >
-              <View
-                className={`w-10 h-10 rounded-full items-center justify-center mb-2 ${
-                  isEarned ? 'bg-primary' : isLocked ? 'bg-gray-200' : 'bg-secondary/30'
-                }`}
-              >
-                <Text
-                  className={`text-base font-bold ${
-                    isEarned ? 'text-white' : 'text-textSecondary'
-                  }`}
-                >
-                  {isEarned ? '*' : isLocked ? '?' : '~'}
-                </Text>
+            <View key={i} style={{ flex: 1, alignItems: 'center', marginHorizontal: 3 }}>
+              {/* Container track */}
+              <View style={{
+                width: '100%',
+                height: CHART_HEIGHT,
+                backgroundColor: 'rgba(184,188,255,0.25)',
+                borderTopLeftRadius: 999,
+                borderTopRightRadius: 999,
+                overflow: 'hidden',
+                justifyContent: 'flex-end',
+              }}>
+                {/* Filled bar */}
+                <View style={{
+                  width: '100%',
+                  height: barH,
+                  backgroundColor: '#4C54BB',
+                }} />
               </View>
-              <Text
-                className={`text-xs text-center font-medium ${
-                  isEarned ? 'text-primary' : isLocked ? 'text-gray-400' : 'text-text'
-                }`}
-              >
-                {milestone.title}
-              </Text>
-              {milestone.progress ? (
-                <Text className="text-[10px] text-textSecondary mt-1">{milestone.progress}</Text>
-              ) : null}
+              <Text style={{ fontSize: 10, fontWeight: '500', color: '#5f5f5d', marginTop: 8 }}>{item.day}</Text>
             </View>
           )
         })}
@@ -484,66 +494,348 @@ function MilestonesSection({ milestones }: { milestones: MilestoneDisplay[] }) {
   )
 }
 
-function RatingBadge({ rating }: { rating: Rating }) {
+function SessionFeelings({ distribution }: { distribution: RatingRow[] }) {
+  const total = distribution.reduce((sum, r) => sum + r.percentage, 0)
+  if (total === 0) return null
+
   return (
-    <View className={`px-2.5 py-1 rounded-full ${RATING_BADGE_BG[rating]}`}>
-      <Text className="text-xs font-medium text-white">{RATING_LABELS[rating]}</Text>
+    <View style={{ marginBottom: 24 }}>
+      <Text style={{ fontSize: 17, fontWeight: '700', color: '#323331', marginBottom: 16 }}>
+        How Sessions Have Felt
+      </Text>
+      <View style={{
+        backgroundColor: '#FFFFFF',
+        borderRadius: 32,
+        padding: 24,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 4,
+        elevation: 1,
+      }}>
+        {/* Stacked bar */}
+        <View style={{
+          flexDirection: 'row',
+          height: 16,
+          borderRadius: 999,
+          overflow: 'hidden',
+          marginBottom: 24,
+        }}>
+          {distribution.filter((r) => r.percentage > 0).map((r) => (
+            <View
+              key={r.label}
+              style={{ width: `${r.percentage}%`, backgroundColor: r.color }}
+            />
+          ))}
+        </View>
+
+        {/* Legend 2-col */}
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16 }}>
+          {distribution.map((r) => (
+            <View key={r.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, width: '45%' }}>
+              <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: r.color }} />
+              <Text style={{ fontSize: 12, fontWeight: '500', color: '#5f5f5d' }}>
+                {r.label} ({r.percentage}%)
+              </Text>
+            </View>
+          ))}
+        </View>
+      </View>
     </View>
   )
 }
 
-// M-05: Fixed row height for getItemLayout optimization
-const SESSION_ITEM_HEIGHT = 66 // p-3.5 (14px*2) + content (~38px) = ~66px
-const SESSION_ITEM_MARGIN_BOTTOM = 8 // mb-2 = 8px
+interface InsightCard {
+  icon: keyof typeof MaterialIcons.glyphMap
+  label: string
+  value: string
+  sub: string
+  bg: string
+  iconColor: string
+  labelColor: string
+  valueColor: string
+  subColor: string
+}
 
-const SessionHistoryItem = React.memo(function SessionHistoryItem({
-  session,
+function InsightsSection({
+  bestDay,
+  hardReason,
+  peakHour,
+  currentStreak,
+  sessionCount,
 }: {
-  session: FocusSession
+  bestDay: string | null
+  hardReason: string | null
+  peakHour: string | null
+  currentStreak: number
+  sessionCount: number
 }) {
-  const formattedDate = new Date(session.started_at).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-  })
-  const durationMin = Math.round((session.actual_secs ?? 0) / 60)
-  const ratingKey = getRatingKey(session)
+  const cards: InsightCard[] = []
+
+  if (bestDay) {
+    cards.push({
+      icon: 'auto-awesome',
+      label: 'Most productive day',
+      value: bestDay,
+      sub: 'Focus is highest on this day.',
+      bg: 'rgba(184,188,255,0.2)',
+      iconColor: '#4C54BB',
+      labelColor: '#4C54BB',
+      valueColor: '#272D97',
+      subColor: 'rgba(39,45,151,0.6)',
+    })
+  }
+
+  if (peakHour) {
+    cards.push({
+      icon: 'wb-sunny',
+      label: 'Peak focus time',
+      value: peakHour,
+      sub: 'When your sessions run longest.',
+      bg: 'rgba(254,208,127,0.2)',
+      iconColor: '#7B5913',
+      labelColor: '#7B5913',
+      valueColor: '#5C3D08',
+      subColor: 'rgba(92,61,8,0.6)',
+    })
+  }
+
+  if (currentStreak > 0) {
+    cards.push({
+      icon: 'local-fire-department',
+      label: 'Current streak',
+      value: `${currentStreak} day${currentStreak === 1 ? '' : 's'}`,
+      sub: currentStreak >= 7 ? 'Keep the momentum going!' : 'Every day counts.',
+      bg: 'rgba(142,244,233,0.2)',
+      iconColor: '#006B64',
+      labelColor: '#006B64',
+      valueColor: '#005C56',
+      subColor: 'rgba(0,92,86,0.6)',
+    })
+  }
+
+  // Only show "What makes it hard" after 3+ sessions (per spec: 5+, relaxed for early users)
+  if (hardReason && sessionCount >= 3) {
+    cards.push({
+      icon: 'bolt',
+      label: 'What makes it hard',
+      value: hardReason,
+      sub: 'Your most common friction point.',
+      bg: 'rgba(172,49,73,0.07)',
+      iconColor: '#AC3149',
+      labelColor: '#AC3149',
+      valueColor: '#323331',
+      subColor: '#5f5f5d',
+    })
+  }
+
+  if (cards.length === 0) return null
+
+  // Pair cards into rows of 2
+  const rows: InsightCard[][] = []
+  for (let i = 0; i < cards.length; i += 2) {
+    rows.push(cards.slice(i, i + 2))
+  }
 
   return (
-    <View className="flex-row items-center bg-white rounded-xl p-3.5 mx-5 mb-2">
-      <View className="flex-1 mr-3">
-        <Text className="text-sm font-medium text-text" numberOfLines={1}>
+    <View style={{ marginBottom: 24 }}>
+      <Text style={{ fontSize: 17, fontWeight: '700', color: '#323331', marginBottom: 16 }}>
+        Insights
+      </Text>
+      {rows.map((row, ri) => (
+        <View key={ri} style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
+          {row.map((card) => (
+            <View key={card.label} style={{
+              width: '48%',
+              height: 160,
+              backgroundColor: card.bg,
+              borderRadius: 32,
+              padding: 20,
+              justifyContent: 'center',
+            }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+                <MaterialIcons name={card.icon} size={16} color={card.iconColor} />
+                <Text style={{
+                  fontSize: 9,
+                  fontWeight: '700',
+                  color: card.labelColor,
+                  letterSpacing: 1,
+                  textTransform: 'uppercase',
+                  marginLeft: 6,
+                  flex: 1,
+                }}>
+                  {card.label}
+                </Text>
+              </View>
+              <Text style={{ fontSize: 16, fontWeight: '800', color: card.valueColor, marginBottom: 4 }} numberOfLines={2}>
+                {card.value}
+              </Text>
+              <Text style={{ fontSize: 11, color: card.subColor, lineHeight: 16 }}>
+                {card.sub}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ))}
+    </View>
+  )
+}
+
+function MilestonesSection({ milestones }: { milestones: MilestoneDisplay[] }) {
+  if (milestones.length === 0) return null
+
+  const MILESTONE_ICONS: Record<string, { icon: keyof typeof MaterialIcons.glyphMap; label: string }> = {
+    'First Session':  { icon: 'workspace-premium', label: 'First Session' },
+    '30-Day Streak':  { icon: 'local-fire-department', label: '30-Day Streak' },
+    '10 Hours':       { icon: 'timer', label: '10 Hours' },
+    '10 Sessions':    { icon: 'workspace-premium', label: '10 Sessions' },
+  }
+
+  return (
+    <View style={{ marginBottom: 24 }}>
+      <Text style={{ fontSize: 17, fontWeight: '700', color: '#323331', marginBottom: 16 }}>
+        Milestones
+      </Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
+        {milestones.map((m) => {
+          const isEarned = m.status === 'earned'
+          const cfg = MILESTONE_ICONS[m.title] ?? { icon: 'star' as keyof typeof MaterialIcons.glyphMap, label: m.title }
+
+          return (
+            <View
+              key={m.title}
+              style={{
+                width: '46%',
+                aspectRatio: 1,
+                borderRadius: 32,
+                padding: 24,
+                alignItems: 'center',
+                justifyContent: 'center',
+                ...(isEarned
+                  ? { backgroundColor: '#8EF4E9' }
+                  : {
+                      borderWidth: 2,
+                      borderStyle: 'dashed' as const,
+                      borderColor: 'rgba(179,178,175,0.3)',
+                    }),
+              }}
+            >
+              <View style={{
+                width: 64,
+                height: 64,
+                borderRadius: 32,
+                backgroundColor: isEarned ? 'rgba(0,107,100,0.12)' : '#F6F3F1',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: 12,
+              }}>
+                <MaterialIcons
+                  name={cfg.icon}
+                  size={32}
+                  color={isEarned ? '#006B64' : 'rgba(179,178,175,0.5)'}
+                />
+              </View>
+              <Text style={{
+                fontSize: 13,
+                fontWeight: '700',
+                color: isEarned ? '#005C56' : 'rgba(179,178,175,0.7)',
+                textAlign: 'center',
+                marginBottom: 2,
+              }}>
+                {m.title}
+              </Text>
+              {m.progress && (
+                <Text style={{ fontSize: 10, color: isEarned ? '#005C56' : 'rgba(179,178,175,0.6)' }}>
+                  {m.progress}
+                </Text>
+              )}
+            </View>
+          )
+        })}
+      </View>
+    </View>
+  )
+}
+
+// --- Session history helpers ---
+
+function getSessionTaskName(session: FocusSession): string {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  if (!session.task_id || uuidRegex.test(session.task_id)) return 'Focus Session'
+  return session.task_id.substring(0, 50)
+}
+
+function getRatingConfig(session: FocusSession): { label: string; color: string } {
+  if (session.rating !== null && session.rating in RATING_CONFIG) {
+    return RATING_CONFIG[session.rating]
+  }
+  return { label: 'Session', color: '#b3b2af' }
+}
+
+function RatingBadge({ session }: { session: FocusSession }) {
+  const cfg = getRatingConfig(session)
+  return (
+    <View style={{
+      paddingHorizontal: 12,
+      paddingVertical: 5,
+      borderRadius: 999,
+      backgroundColor: cfg.color + '22',
+    }}>
+      <Text style={{ fontSize: 11, fontWeight: '700', color: cfg.color }}>
+        {cfg.label}
+      </Text>
+    </View>
+  )
+}
+
+const SessionHistoryItem = React.memo(function SessionHistoryItem({ session }: { session: FocusSession }) {
+  const date = new Date(session.started_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  const durationMin = Math.round((session.actual_secs ?? 0) / 60)
+
+  return (
+    <View style={{
+      backgroundColor: '#FFFFFF',
+      borderRadius: 24,
+      padding: 16,
+      marginBottom: 10,
+      flexDirection: 'row',
+      alignItems: 'center',
+    }}>
+      <View style={{ flex: 1, marginRight: 12 }}>
+        <Text style={{ fontSize: 14, fontWeight: '600', color: '#323331' }} numberOfLines={1}>
           {getSessionTaskName(session)}
         </Text>
-        <View className="flex-row items-center mt-1">
-          <Text className="text-xs text-textSecondary">{formattedDate}</Text>
-          <Text className="text-xs text-textSecondary mx-1.5">--</Text>
-          <Text className="text-xs text-textSecondary">{durationMin} min</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 6 }}>
+          <Text style={{ fontSize: 12, color: '#5f5f5d' }}>{date}</Text>
+          <Text style={{ fontSize: 12, color: '#b3b2af' }}>·</Text>
+          <Text style={{ fontSize: 12, color: '#5f5f5d' }}>{durationMin} min</Text>
         </View>
       </View>
-      <RatingBadge rating={ratingKey} />
+      <RatingBadge session={session} />
     </View>
   )
 })
 
 function EmptyState() {
   return (
-    <View className="items-center py-16 mx-5">
-      <View className="w-16 h-16 rounded-full bg-secondary/20 items-center justify-center mb-4">
-        <Text className="text-2xl text-secondary">~</Text>
+    <View style={{ alignItems: 'center', paddingVertical: 64 }}>
+      <View style={{
+        width: 64,
+        height: 64,
+        borderRadius: 32,
+        backgroundColor: 'rgba(142,244,233,0.2)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 16,
+      }}>
+        <MaterialIcons name="analytics" size={28} color="#006B64" />
       </View>
-      <Text className="text-base font-semibold text-text mb-2">No sessions yet</Text>
-      <Text className="text-sm text-textSecondary text-center leading-5">
-        Complete your first focus session to start tracking your progress here.
+      <Text style={{ fontSize: 16, fontWeight: '600', color: '#323331', marginBottom: 8 }}>
+        No sessions yet
       </Text>
-    </View>
-  )
-}
-
-function LoadingState() {
-  return (
-    <View className="flex-1 items-center justify-center py-20">
-      <ActivityIndicator size="large" color="#8B5CF6" />
-      <Text className="text-sm text-textSecondary mt-3">Loading your progress...</Text>
+      <Text style={{ fontSize: 14, color: '#5f5f5d', textAlign: 'center', lineHeight: 22 }}>
+        Complete your first focus session to start{'\n'}tracking your progress here.
+      </Text>
     </View>
   )
 }
@@ -551,7 +843,10 @@ function LoadingState() {
 // --- Main Screen ---
 
 export default function ProgressScreen() {
+  const router = useRouter()
   const user = useAuthStore((s) => s.user)
+  const profile = useAuthStore((s) => s.profile)
+  const authLoading = useAuthStore((s) => s.isLoading)
   const userId = user?.id
 
   const [selectedPeriod, setSelectedPeriod] = useState<Period>('week')
@@ -561,15 +856,16 @@ export default function ProgressScreen() {
   const [allSessions, setAllSessions] = useState<FocusSession[]>([])
   const [stats, setStats] = useState<SessionStats | null>(null)
   const [earnedMilestones, setEarnedMilestones] = useState<MilestoneRow[]>([])
+  const [promises, setPromises] = useState<PromiseRecord[]>([])
+  const [checkIns, setCheckIns] = useState<DailyCheckIn[]>([])
 
   const fetchData = useCallback(async () => {
-    if (!userId) {
-      setLoading(false)
-      return
-    }
-
+    if (!userId) return
+    setLoading(true)
     try {
-      const [sessionsResult, statsResult, milestonesResult] = await Promise.all([
+      const since90 = new Date()
+      since90.setDate(since90.getDate() - 90)
+      const [sessionsResult, statsResult, milestonesResult, promisesResult, checkInsResult] = await Promise.all([
         getRecentSessions(userId, 200),
         getSessionStats(userId),
         supabase
@@ -577,11 +873,19 @@ export default function ProgressScreen() {
           .select('*')
           .eq('user_id', userId)
           .order('achieved_at', { ascending: false }),
+        getPromiseHistory(userId, 30),
+        supabase
+          .from('daily_check_ins')
+          .select('hard_reason, check_in_date, energy_level')
+          .eq('user_id', userId)
+          .gte('check_in_date', since90.toISOString().slice(0, 10))
+          .order('check_in_date', { ascending: false }),
       ])
-
       setAllSessions(sessionsResult)
       setStats(statsResult)
       setEarnedMilestones((milestonesResult.data ?? []) as unknown as MilestoneRow[])
+      setPromises(promisesResult)
+      setCheckIns((checkInsResult.data ?? []) as unknown as DailyCheckIn[])
     } catch (err) {
       captureError(err instanceof Error ? err : new Error(String(err)), {
         context: 'ProgressScreen.fetchData',
@@ -591,7 +895,18 @@ export default function ProgressScreen() {
     }
   }, [userId])
 
-  // Fetch on mount and re-fetch when screen gains focus
+  // Re-fetch when userId becomes available (handles HMR / cold-start race where
+  // useFocusEffect already fired before auth was restored into the store).
+  // Also stops the spinner if auth finishes but there's no user (logged out).
+  useEffect(() => {
+    if (userId) {
+      fetchData()
+    } else if (!authLoading) {
+      setLoading(false)
+    }
+  }, [userId, authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-fetch every time the tab gains focus (e.g. returning from timer screen)
   useFocusEffect(
     useCallback(() => {
       fetchData()
@@ -604,7 +919,6 @@ export default function ProgressScreen() {
     setRefreshing(false)
   }, [fetchData])
 
-  // Derived data
   const filteredSessions = useMemo(
     () => filterSessionsByPeriod(allSessions, selectedPeriod),
     [allSessions, selectedPeriod],
@@ -617,14 +931,16 @@ export default function ProgressScreen() {
     [stats],
   )
 
-  const insights = useMemo(
-    () =>
-      computeInsights(
-        allSessions,
-        stats ?? { totalSessions: 0, totalTimeSecs: 0, avgDurationSecs: 0, ratingDistribution: {} },
-      ),
-    [allSessions, stats],
-  )
+  const bestDay = useMemo(() => computeBestDay(allSessions), [allSessions])
+  const hardReason = useMemo(() => computeTopHardReason(checkIns), [checkIns])
+  const peakHour = useMemo(() => computePeakHour(allSessions), [allSessions])
+
+  const localStreak = useMemo(() => {
+    const dates = allSessions
+      .filter((s) => s.status === 'completed')
+      .map((s) => s.started_at.slice(0, 10))
+    return computeStreak(dates)
+  }, [allSessions])
 
   const milestoneDisplays = useMemo(
     () =>
@@ -635,7 +951,6 @@ export default function ProgressScreen() {
     [stats, earnedMilestones],
   )
 
-  // Compute period stats for stat cards
   const periodStats = useMemo(() => {
     const completed = filteredSessions.filter((s) => s.status === 'completed')
     const totalSecs = completed.reduce((sum, s) => sum + (s.actual_secs ?? 0), 0)
@@ -643,170 +958,147 @@ export default function ProgressScreen() {
     const sessionCount = completed.length
     const avgMin = sessionCount > 0 ? Math.round(totalSecs / sessionCount / 60) : 0
 
-    // Compute "vs last week" comparison
-    const now = new Date()
-    const oneWeekAgo = new Date(now)
-    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7)
-    const twoWeeksAgo = new Date(now)
-    twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14)
+    // Compute previous period for trend arrows
+    const toTrend = (curr: number, prev: number): Trend =>
+      prev === 0 ? 'flat' : curr > prev ? 'up' : curr < prev ? 'down' : 'flat'
 
-    const thisWeekSessions = allSessions.filter((s) => {
-      const d = new Date(s.started_at)
-      return d >= oneWeekAgo && s.status === 'completed'
-    })
-    const lastWeekSessions = allSessions.filter((s) => {
-      const d = new Date(s.started_at)
-      return d >= twoWeeksAgo && d < oneWeekAgo && s.status === 'completed'
-    })
-
-    const thisWeekSecs = thisWeekSessions.reduce((sum, s) => sum + (s.actual_secs ?? 0), 0)
-    const lastWeekSecs = lastWeekSessions.reduce((sum, s) => sum + (s.actual_secs ?? 0), 0)
-
-    let focusTrend = 'No prior data'
-    let focusTrendUp = true
-    if (lastWeekSecs > 0) {
-      const pctChange = Math.round(((thisWeekSecs - lastWeekSecs) / lastWeekSecs) * 100)
-      focusTrend = `${Math.abs(pctChange)}% vs last week`
-      focusTrendUp = pctChange >= 0
-    } else if (thisWeekSecs > 0) {
-      focusTrend = 'New this week'
-      focusTrendUp = true
+    let trends: [Trend, Trend, Trend] = ['flat', 'flat', 'flat']
+    if (selectedPeriod !== 'all') {
+      const periodMs = selectedPeriod === 'week' ? 7 * 86400000 : 30 * 86400000
+      const now = Date.now()
+      const prevStart = new Date(now - periodMs * 2)
+      const prevEnd = new Date(now - periodMs)
+      const prevCompleted = allSessions.filter((s) => {
+        const t = new Date(s.started_at).getTime()
+        return s.status === 'completed' && t >= prevStart.getTime() && t < prevEnd.getTime()
+      })
+      const prevSecs = prevCompleted.reduce((sum, s) => sum + (s.actual_secs ?? 0), 0)
+      const prevCount = prevCompleted.length
+      const prevAvg = prevCount > 0 ? Math.round(prevSecs / prevCount / 60) : 0
+      trends = [
+        toTrend(totalSecs, prevSecs),
+        toTrend(sessionCount, prevCount),
+        toTrend(avgMin, prevAvg),
+      ]
     }
 
-    const sessionDiff = thisWeekSessions.length - lastWeekSessions.length
-    let sessionTrend = 'No prior data'
-    let sessionTrendUp = true
-    if (lastWeekSessions.length > 0) {
-      sessionTrend = `${Math.abs(sessionDiff)} ${sessionDiff >= 0 ? 'more' : 'fewer'}`
-      sessionTrendUp = sessionDiff >= 0
-    } else if (thisWeekSessions.length > 0) {
-      sessionTrend = 'New this week'
-      sessionTrendUp = true
-    }
+    return { totalHrs, sessionCount, avgMin, trends }
+  }, [filteredSessions, selectedPeriod, allSessions])
 
-    const thisWeekAvg =
-      thisWeekSessions.length > 0 ? Math.round(thisWeekSecs / thisWeekSessions.length / 60) : 0
-    const lastWeekAvg =
-      lastWeekSessions.length > 0 ? Math.round(lastWeekSecs / lastWeekSessions.length / 60) : 0
-    let avgTrend = 'No prior data'
-    let avgTrendUp = true
-    if (lastWeekAvg > 0) {
-      const pctChange = Math.round(((thisWeekAvg - lastWeekAvg) / lastWeekAvg) * 100)
-      avgTrend = `${Math.abs(pctChange)}% vs last week`
-      avgTrendUp = pctChange >= 0
-    } else if (thisWeekAvg > 0) {
-      avgTrend = 'New this week'
-      avgTrendUp = true
-    }
+  const trustSparkline = useMemo(() => buildTrustSparkline(promises), [promises])
 
-    return {
-      totalHrs,
-      sessionCount,
-      avgMin,
-      focusTrend,
-      focusTrendUp,
-      sessionTrend,
-      sessionTrendUp,
-      avgTrend,
-      avgTrendUp,
-    }
-  }, [filteredSessions, allSessions])
-
-  const hasData = allSessions.length > 0
-
-  // H-HOOKS: useMemo must be called unconditionally (before any early returns)
-  const listHeader = useMemo(
-    () => (
-      <>
-        <Text className="text-2xl font-bold text-text mx-5 mt-4 mb-4">Progress</Text>
-
-        <PeriodSelector selected={selectedPeriod} onSelect={setSelectedPeriod} />
-
-        {/* Stats Overview */}
-        <View className="flex-row mx-4 mb-4">
-          <StatCard
-            title="Total Focus"
-            value={periodStats.totalHrs}
-            unit="hrs"
-            trend={periodStats.focusTrend}
-            trendUp={periodStats.focusTrendUp}
-          />
-          <StatCard
-            title="Sessions"
-            value={String(periodStats.sessionCount)}
-            trend={periodStats.sessionTrend}
-            trendUp={periodStats.sessionTrendUp}
-          />
-          <StatCard
-            title="Avg Duration"
-            value={String(periodStats.avgMin)}
-            unit="min"
-            trend={periodStats.avgTrend}
-            trendUp={periodStats.avgTrendUp}
-          />
-        </View>
-
-        <FocusChart data={weeklyChart} />
-        <SessionBreakdown distribution={ratingDistribution} />
-        <InsightsSection insights={insights} />
-        <MilestonesSection milestones={milestoneDisplays} />
-
-        <View className="mx-5 mb-2">
-          <Text className="text-base font-semibold text-text">Recent Sessions</Text>
-        </View>
-      </>
-    ),
-    [selectedPeriod, periodStats, weeklyChart, ratingDistribution, insights, milestoneDisplays],
-  )
+  const avatarInitial = (profile?.display_name ?? user?.email ?? 'U')[0].toUpperCase()
+  const currentTrustScore = profile?.trust_score ?? 50
 
   if (loading) {
     return (
-      <SafeAreaView className="flex-1 bg-background" edges={['top']}>
-        <Text className="text-2xl font-bold text-text mx-5 mt-4 mb-4">Progress</Text>
-        <LoadingState />
-      </SafeAreaView>
-    )
-  }
-
-  if (!hasData) {
-    return (
-      <SafeAreaView className="flex-1 bg-background" edges={['top']}>
-        <FlatList
-          data={[]}
-          keyExtractor={() => ''}
-          renderItem={() => null}
-          ListHeaderComponent={
-            <>
-              <Text className="text-2xl font-bold text-text mx-5 mt-4 mb-4">Progress</Text>
-              <EmptyState />
-            </>
-          }
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5CF6" />
-          }
-        />
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#FCF9F7' }} edges={['top']}>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator size="large" color="#4C54BB" />
+          <Text style={{ fontSize: 14, color: '#5f5f5d', marginTop: 12 }}>
+            Loading your progress...
+          </Text>
+        </View>
       </SafeAreaView>
     )
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-background" edges={['top']}>
-      <FlatList
-        data={filteredSessions}
-        keyExtractor={(item) => item.id}
-        ListHeaderComponent={listHeader}
-        renderItem={({ item }) => <SessionHistoryItem session={item} />}
-        getItemLayout={(_data, index) => ({
-          length: SESSION_ITEM_HEIGHT + SESSION_ITEM_MARGIN_BOTTOM,
-          offset: (SESSION_ITEM_HEIGHT + SESSION_ITEM_MARGIN_BOTTOM) * index,
-          index,
-        })}
-        ListFooterComponent={<View className="h-8" />}
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#FCF9F7' }} edges={['top']}>
+      {/* Top app bar */}
+      <View style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 24,
+        height: 64,
+        backgroundColor: '#FCF9F7',
+      }}>
+        <View style={{
+          width: 36,
+          height: 36,
+          borderRadius: 999,
+          backgroundColor: '#B8BCFF',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}>
+          <Text style={{ fontSize: 14, fontWeight: '700', color: '#272D97' }}>{avatarInitial}</Text>
+        </View>
+        <Text style={{ fontSize: 20, fontWeight: '700', color: '#8B93FF', letterSpacing: -0.3 }}>
+          Driftless
+        </Text>
+        <Pressable
+          onPress={() => router.push('/(tabs)/settings' as never)}
+          style={({ pressed }) => ({ padding: 8, borderRadius: 999, backgroundColor: pressed ? '#F6F3F1' : 'transparent' })}
+          accessibilityRole="button"
+          accessibilityLabel="Settings"
+        >
+          <MaterialIcons name="settings" size={24} color="#5f5f5d" />
+        </Pressable>
+      </View>
+
+      <ScrollView
+        contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 24, paddingBottom: 100 }}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5CF6" />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#4C54BB" />
         }
-      />
+      >
+        {/* Page heading */}
+        <Text style={{ fontSize: 34, fontWeight: '800', color: '#323331', letterSpacing: -0.5, marginBottom: 20 }}>
+          Progress
+        </Text>
+
+        <PeriodSelector selected={selectedPeriod} onSelect={setSelectedPeriod} />
+
+        <StatCards
+          totalHrs={periodStats.totalHrs}
+          sessionCount={periodStats.sessionCount}
+          avgMin={periodStats.avgMin}
+          trends={periodStats.trends}
+        />
+
+        <FocusChart data={weeklyChart} />
+
+        <TrustScoreSparkline data={trustSparkline} currentScore={currentTrustScore} />
+
+        {allSessions.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <>
+            <SessionFeelings distribution={ratingDistribution} />
+            <InsightsSection
+              bestDay={bestDay}
+              hardReason={hardReason}
+              peakHour={peakHour}
+              currentStreak={localStreak}
+              sessionCount={allSessions.filter((s) => s.status === 'completed').length}
+            />
+            <MilestonesSection milestones={milestoneDisplays} />
+
+            {/* Recent Sessions */}
+            <View style={{ marginBottom: 8 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <Text style={{ fontSize: 17, fontWeight: '700', color: '#323331' }}>
+                  Recent Sessions
+                </Text>
+                <Text style={{ fontSize: 12, fontWeight: '500', color: '#5f5f5d' }}>
+                  {filteredSessions.length} total
+                </Text>
+              </View>
+              {filteredSessions.length === 0 ? (
+                <Text style={{ fontSize: 14, color: '#5f5f5d', textAlign: 'center', paddingVertical: 24 }}>
+                  No sessions in this period.
+                </Text>
+              ) : (
+                filteredSessions.map((session) => (
+                  <SessionHistoryItem key={session.id} session={session} />
+                ))
+              )}
+            </View>
+          </>
+        )}
+      </ScrollView>
     </SafeAreaView>
   )
 }

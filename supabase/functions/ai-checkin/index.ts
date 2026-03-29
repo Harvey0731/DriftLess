@@ -289,10 +289,11 @@ Deno.serve(async (req) => {
 
     let openaiRes: Response
     try {
+      const openaiKey = Deno.env.get('OPENAI_API_KEY') || req.headers.get('x-openai-key') || ''
       openaiRes = await fetch(OPENAI_API_URL, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${Deno.env.get('OPENAI_API_KEY')}`,
+          Authorization: `Bearer ${openaiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
